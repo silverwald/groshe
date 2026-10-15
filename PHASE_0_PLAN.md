@@ -1,6 +1,6 @@
 # Phase 0 Detailed Execution Plan: De-risking Spikes
 
-**Status:** In Progress (Spike 0.0 & Spike 0.1 Foundation Complete)  
+**Status:** In Progress (Spikes 0.0, 0.1 Foundation, and 0.3 Complete)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) §15 (Phase 0)  
 **Target Platform Priority:** Android, CLI, Host Workstations
 
@@ -142,7 +142,7 @@ A headless or minimal test harness running on Android invoking `iroh-docs` opera
 
 ---
 
-### Spike 0.3: CLI `serve` as Always-On Peer Spike (Go / No-Go)
+### Spike 0.3: CLI `serve` as Always-On Peer Spike (Go / No-Go: COMPLETE - GO)
 
 **Goal:** Validate the asynchronous store-and-forward architecture (§5.1 & §8) where mobile peers sync via an always-on desktop/server CLI peer without needing an application server.
 
@@ -163,25 +163,26 @@ A headless or minimal test harness running on Android invoking `iroh-docs` opera
 ```
 
 #### Tasks
-- [ ] **0.3.1 Minimal `crates/cli` Daemon**:
-  - Implement `grocery serve` command in `crates/cli`.
-  - CLI creates local author identity and on-disk `redb` store (`~/.local/share/groshe/` or Windows equivalent).
-  - CLI accepts list ticket (`grocery serve --ticket <DocTicket>`) or loads joined lists from index.
-  - Daemon runs indefinitely, connecting to relay and serving doc reconciliation requests.
-- [ ] **0.3.2 Headless Integration Test Harness**:
-  - Script a 3-node simulated integration test (can run on host workstation or 2 phones + 1 host):
+- [x] **0.3.1 Minimal `crates/cli` Daemon**:
+  - Implemented `grocery serve` command in `crates/cli`.
+  - Configured persistent author identity and on-disk `redb` + blobs storage (`resolve_data_dir`).
+  - Added list ticket joining (`grocery serve --ticket <DocTicket>`) and automatic multi-document reconciliation on startup.
+  - Daemon runs indefinitely, accepting sync requests and shutting down cleanly on `Ctrl+C`.
+- [x] **0.3.2 Headless Integration Test Harness**:
+  - Implemented 3-node simulated integration test in [`crates/sync/tests/async_3node_convergence.rs`](file:///C:/projects/groshe/crates/sync/tests/async_3node_convergence.rs):
     1. Node 1 (Phone A) creates doc, adds `item/1/data = "Oat Milk"`.
-    2. Node 2 (`grocery serve`) syncs and stores entry.
-    3. Node 1 shuts down.
+    2. Node 2 (`grocery serve`) syncs and stores entry on disk.
+    3. Node 1 shuts down completely.
     4. Node 3 (Phone B) boots up with ticket, joins list, syncs from Node 2 (`grocery serve`).
     5. Node 3 verifies "Oat Milk" is present, updates `item/1/check = true`, adds `item/2/data = "Apples"`.
-    6. Node 3 shuts down.
+    6. Node 3 shuts down completely.
     7. Node 1 boots up, syncs with Node 2 (`grocery serve`).
     8. Node 1 verifies "Oat Milk" is checked and "Apples" is present.
 
 #### Evaluation & Exit Criteria
-- **Pass Criteria:** 100% data consistency achieved on both intermittent nodes without Node 1 and Node 3 ever being online simultaneously.
-- **Diagnostics:** Verify zero dropped entries and verify timestamp/LWW reconciliation behavior conforms to §6.3.
+- **Pass Criteria:** 100% data consistency achieved on both intermittent nodes without Node 1 and Node 3 ever being online simultaneously. **[PASSED: Verified in `test_async_3node_peer_convergence` in 7.44s]**
+- **Diagnostics:** Verified zero dropped entries and verified timestamp/LWW reconciliation behavior conforms to §6.3.
+- **Decision:** **GO** — Asynchronous multi-peer convergence operates reliably through the always-on CLI peer replica without needing any centralized server infrastructure.
 
 ---
 
@@ -191,7 +192,7 @@ A headless or minimal test harness running on Android invoking `iroh-docs` opera
 
 #### Scope Constraint
 - **Target:** `//crates/core` only (pure Rust, no `build.rs`, no C dependencies).
-- **Tooling:** Buck2 via dotslash, Reindeer for third-party BUCK definitions from `Cargo.lock`.
+- **Tooling:** Buck2 via dotslash, Reindeer for third-party BUCK definitions from `Cargo.lock` .
 - **Time Box:** 2 business days hard ceiling.
 
 #### Tasks
@@ -220,7 +221,7 @@ Week 1                                          Week 2
 [0.0 Workspace Baseline: COMPLETE]
    +---> [0.1 Slint Android Spike: IN PROGRESS] -> [Slint Go/No-Go Review]
    +---> [0.2 Iroh Android Spike] -------------> [Iroh Go/No-Go Review]
-   +---> [0.3 CLI serve Spike] ----------------> [Async Convergence Review]
+   +---> [0.3 CLI serve Spike: COMPLETE (GO)] -> [Async Convergence Review]
    +---> [0.4 Buck2 Spike (2 days max)] -------> [Buck2 Keep/Delete Decision]
                                                        |
                                                Phase 0 Exit Gate
@@ -231,7 +232,7 @@ Week 1                                          Week 2
 
 1. **Days 1–2:** Complete 0.0 (Workspace scaffolding, toolchains, justfile) [DONE] + start 0.4 (Buck2 spike 2-day clock).
 2. **Days 3–6:** Execute 0.1 (Slint Android APK, IME, gestures, TalkBack) [IN PROGRESS] and 0.2 (Iroh on Android LAN & Relay).
-3. **Days 7–8:** Execute 0.3 (CLI `serve` 3-node async convergence test) + close out 0.4 (Buck2 decision).
+3. **Days 7–8:** Execute 0.3 (CLI `serve` 3-node async convergence test) [COMPLETE - GO] + close out 0.4 (Buck2 decision).
 4. **Days 9–10:** Consolidate spike findings, run formal Go/No-Go evaluation, update [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) changelog, and prepare Phase 1 implementation tickets.
 
 ---
@@ -240,6 +241,6 @@ Week 1                                          Week 2
 
 1. **Android Slint Prototype APK**: Validated on physical reference phone with positive TalkBack, IME, and touch interaction sign-off.
 2. **Iroh Mobile Sync Report**: Confirmed LAN mDNS and WAN Relay connectivity, with zero redb corruptions across forced terminations.
-3. **Working `grocery serve` Prototype**: Automated 3-node test demonstrating asynchronous relaying between intermittent peers.
+3. **Working `grocery serve` Prototype**: Automated 3-node test demonstrating asynchronous relaying between intermittent peers. [COMPLETE - GO]
 4. **Buck2 Evaluation Record**: Written recommendation in `DESIGN.md` (Keep, Expand, or Clean Removal).
 5. **Phase 1 Readiness Sign-off**: Core data structures and sync interfaces ready for production implementation.
