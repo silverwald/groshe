@@ -1,0 +1,8 @@
+manifest_path = "Cargo.toml"
+third_party_dir = "."
+fixups_dir = "fixups"
+vendor = false
+cargo_env = true
+
+[buck]
+file_name = "BUCK"
