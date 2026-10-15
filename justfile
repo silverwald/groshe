@@ -72,12 +72,12 @@ android-preview:
 
 # Buck2 (Spike 0.4): Build core crate targets with Buck2
 buck2-build:
-    buck2 build //crates/core:...
+    buck2 build "root//crates/core:"
 
 # Buck2 (Spike 0.4): Run core crate tests with Buck2
 buck2-test:
-    buck2 test //crates/core:...
+    buck2 test "root//crates/core:"
 
 # Buck2 (Spike 0.4): Generate rust-project.json for rust-analyzer
 buck2-lsp:
-    buck2 lsp --to-file rust-project.json //crates/core:...
+    powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts/gen-rust-project.ps1
