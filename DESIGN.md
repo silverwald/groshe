@@ -268,6 +268,12 @@ Existing per-list documents are not merged or rewritten.
   not worse than Cargo, IDE works. Ends with an explicit keep / expand /
   delete decision recorded in this doc's changelog. If deleted, the BUCK
   files are deleted with it — no zombie build system.
+- **Evaluation Outcome & Decision (2026-10-15):** Concluded with **DELETE**.
+  - *Build Performance:* Cargo demonstrated faster incremental (455ms vs 885ms zero-work) and single-crate clean builds (517ms vs 2011ms).
+  - *Host Compatibility:* Buck2 relies on symlinks during action staging, failing on Windows with OS Error 1314 unless Windows Developer Mode is enabled or elevated; Cargo requires no special OS privileges.
+  - *Maintenance Overhead:* Even on pure-Rust `crates/core`, transitive dependencies (`serde_core 1.0`, `thiserror 2.0`, `serde_json 1.0`) required manual Reindeer build script fixups (`[buildscript] run = true` and `cargo_env = true`).
+  - *IDE Ergonomics:* Required generating synthetic `rust-project.json` files via Buck2 BXL queries instead of native Cargo manifest discovery.
+  - *Action:* Purged all BUCK and Reindeer configuration files per §12.2 ("no zombie build system"); Cargo remains the sole canonical build toolchain.
 
 ### 12.3 Revisit triggers for a primary non-Cargo build system
 Re-evaluate (Bazel first, for its larger open-source Rust/Android/Apple rule
@@ -366,6 +372,7 @@ appears.
 
 ## Changelog
 
+- 2026-10-15 — Spike 0.4 completed on `crates/core`. Buck2 build, test, and `rust-project.json` generation verified. Performance (Cargo 455ms vs Buck2 885ms incremental) and Windows Developer Mode symlink friction evaluated. Decision: **DELETE** (all BUCK files removed; no zombie build system). Cargo remains canonical.
 - 2026-10-14 — Initial version. Decisions recorded: no GPUI; Slint UI;
   iroh-docs as the CRDT; Cargo canonical with a time-boxed Buck2 spike on
   `crates/core` only; web companion-only in v1; CLI as full peer; per-list
