@@ -129,6 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    println!("Groshe mobile UI initialized successfully with dynamic VecModel.");
+    println!("Starting Groshe mobile preview window...");
+    app.run()?;
     Ok(())
 }
