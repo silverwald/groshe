@@ -17,6 +17,10 @@ export JAVA_HOME := env("JAVA_HOME", jdk_dir)
 
 default: check test
 
+# Validate and configure the Windows development environment (Rust, MSRV, NDK, Java, Android SDK)
+bootstrap:
+    powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
+
 # Check all workspace targets
 check:
     cargo check --workspace --all-targets
