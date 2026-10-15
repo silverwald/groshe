@@ -220,6 +220,13 @@ impl GrosheSyncNode {
             .map_err(|e| SyncError::Doc(e.to_string()))
     }
 
+    /// Start syncing an existing document with peers in a DocTicket.
+    pub async fn join_ticket(&self, doc: &Doc, ticket: &DocTicket) -> Result<(), SyncError> {
+        doc.start_sync(ticket.nodes.clone())
+            .await
+            .map_err(|e| SyncError::Doc(e.to_string()))
+    }
+
     /// List all local document NamespaceIds.
     pub async fn list_ids(&self) -> Result<Vec<NamespaceId>, SyncError> {
         let stream = self
@@ -251,14 +258,17 @@ impl GrosheSyncNode {
         Ok(())
     }
 
-    /// Get the value of an exact key in a document.
+    /// Get the latest value of an exact key across all authors.
     pub async fn get_entry(
         &self,
         doc: &Doc,
         key: impl AsRef<[u8]>,
     ) -> Result<Option<Vec<u8>>, SyncError> {
+        let query = Query::single_latest_per_key()
+            .key_exact(key.as_ref().to_vec())
+            .build();
         let entry = doc
-            .get_exact(self.author_id, key.as_ref().to_vec(), false)
+            .get_one(query)
             .await
             .map_err(|e| SyncError::Doc(e.to_string()))?;
         if let Some(e) = entry {
@@ -273,7 +283,7 @@ impl GrosheSyncNode {
         }
     }
 
-    /// Query all entries matching a prefix.
+    /// Query all latest entries matching a prefix across all authors.
     pub async fn get_entries_prefix(
         &self,
         doc: &Doc,
