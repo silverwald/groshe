@@ -57,6 +57,15 @@ android-check:
 android-build PROFILE="debug":
     cargo ndk -t arm64-v8a -t x86_64 build -p groshe-android {{ if PROFILE == "release" { "--release" } else { "" } }}
 
+# Package signed Android APK for device/emulator testing
+android-package TARGET="arm64-v8a" PROFILE="release":
+    powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts/package-apk.ps1 -Target {{ TARGET }} -Profile {{ PROFILE }}
+
+# Install, launch, and benchmark cold start time on connected Android device/emulator
+android-run TARGET="arm64-v8a" PROFILE="release":
+    powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts/package-apk.ps1 -Target {{ TARGET }} -Profile {{ PROFILE }}
+    powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts/run-on-device.ps1 -Target {{ TARGET }} -Profile {{ PROFILE }}
+
 # Launch the interactive Slint mobile preview
 android-preview:
     cargo run -p groshe-android
