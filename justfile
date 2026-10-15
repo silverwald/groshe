@@ -1,5 +1,9 @@
 # Groshe Task Runner
 
+# On Windows, just defaults to `sh` which is usually absent. Use [windows] attribute to set powershell.exe.
+[windows]
+set shell := ["powershell.exe", "-NoLogo", "-Command"]
+
 default: check test
 
 # Check all workspace targets
@@ -24,7 +28,7 @@ lint:
 
 # Run the CLI binary
 cli *ARGS:
-    cargo run -p groshe-cli -- {{ARGS}}
+    cargo run -p groshe-cli -- {{ ARGS }}
 
 # Test core domain crate only
 test-core:
