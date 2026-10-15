@@ -9,7 +9,6 @@ target/
 *.swo
 .DS_Store
 Thumbs.db
-rust-project.json
 
 # Android
 apps/android/.gradle/
@@ -17,7 +16,3 @@ apps/android/build/
 apps/android/local.properties
 *.apk
 *.aab
-
-# Buck2
-buck-out/
-.buckd/

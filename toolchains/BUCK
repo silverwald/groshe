@@ -1,4 +1,0 @@
-load("@prelude//toolchains:demo.bzl", "system_demo_toolchains")
-
-# Host toolchains automatically discovering rustc and native tools from PATH/system.
-system_demo_toolchains()
