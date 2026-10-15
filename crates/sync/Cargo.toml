@@ -10,6 +10,17 @@ description = "Iroh Endpoint, iroh-docs synchronization, and ticket management f
 groshe-core = { workspace = true }
 serde = { workspace = true, features = ["alloc"] }
 thiserror.workspace = true
+anyhow = "1.0"
 uuid.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+iroh = "1.3"
+iroh-blobs = "0.103"
+iroh-gossip = "0.101"
+iroh-docs = { version = "0.101", features = ["fs-store"] }
+futures-util = "0.3"
+tokio-stream = "0.1"
+
+[dev-dependencies]
+rand = "0.10"
+tempfile = "3.17"
