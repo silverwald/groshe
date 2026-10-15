@@ -212,6 +212,16 @@ impl GrosheSyncNode {
             .map_err(|e| SyncError::Doc(e.to_string()))
     }
 
+    /// Subscribe to live events for an existing open document.
+    pub async fn subscribe_doc(
+        &self,
+        doc: &Doc,
+    ) -> Result<impl futures_util::Stream<Item = anyhow::Result<LiveEvent>>, SyncError> {
+        doc.subscribe()
+            .await
+            .map_err(|e| SyncError::Doc(e.to_string()))
+    }
+
     /// Open an existing document by its NamespaceId.
     pub async fn open_list(&self, id: NamespaceId) -> Result<Option<Doc>, SyncError> {
         self.docs
