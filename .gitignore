@@ -1,0 +1,22 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Android
+apps/android/.gradle/
+apps/android/build/
+apps/android/local.properties
+*.apk
+*.aab
+
+# Buck2
+buck-out/
+.buckd/

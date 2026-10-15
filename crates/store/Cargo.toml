@@ -1,0 +1,13 @@
+[package]
+name = "groshe-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Materialized view projection and persistence for Groshe"
+
+[dependencies]
+groshe-core = { workspace = true }
+serde = { workspace = true, features = ["alloc"] }
+thiserror.workspace = true
+uuid.workspace = true

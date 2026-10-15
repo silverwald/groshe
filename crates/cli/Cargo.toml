@@ -1,0 +1,20 @@
+[package]
+name = "groshe-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Full peer CLI binary and headless serve daemon for Groshe"
+
+[[bin]]
+name = "grocery"
+path = "src/main.rs"
+
+[dependencies]
+groshe-core = { workspace = true }
+groshe-sync = { workspace = true }
+groshe-store = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing.workspace = true
+tracing-subscriber = { workspace = true }

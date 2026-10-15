@@ -1,0 +1,17 @@
+[package]
+name = "groshe-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Android mobile app entry point for Groshe"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+groshe-core = { workspace = true }
+groshe-sync = { workspace = true }
+groshe-store = { workspace = true }
+slint = { workspace = true }
+tracing.workspace = true
