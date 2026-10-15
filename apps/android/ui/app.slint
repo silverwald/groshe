@@ -1,0 +1,261 @@
+import { Button, CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct GroceryItemData {
+    id: string,
+    name: string,
+    quantity: string,
+    category: string,
+    checked: bool,
+}
+
+export struct GroceryListInfo {
+    id: string,
+    title: string,
+    item_count: int,
+    sync_status: string,
+}
+
+export component AppWindow inherits Window {
+    title: "Groshe - Mobile Preview";
+    min-width: 360px;
+    min-height: 640px;
+    preferred-width: 390px;
+    preferred-height: 800px;
+    background: root.dark-mode ? #121212 : #f8f9fa;
+
+    in-out property <bool> dark-mode: true;
+    in-out property <bool> in-store-mode: false;
+    in-out property <int> active-tab: 1; // 0: lists, 1: list detail
+    in-out property <string> new-item-name: "";
+    in-out property <int> new-item-qty: 1;
+    in-out property <string> active-list-title: "Weekly Groceries";
+    in-out property <string> undo-toast-message: "";
+    in-out property <bool> show-undo-toast: false;
+
+    in property <[GroceryListInfo]> lists: [
+        { id: "1", title: "Weekly Groceries", item_count: 5, sync_status: "Synced" },
+        { id: "2", title: "Costco Run", item_count: 8, sync_status: "1 peer nearby" }
+    ];
+
+    in-out property <[GroceryItemData]> items: [
+        { id: "1", name: "Organic Honeycrisp Apples", quantity: "4", category: "Produce", checked: false },
+        { id: "2", name: "Almond Milk", quantity: "2 cartons", category: "Dairy & Alt", checked: false },
+        { id: "3", name: "Sourdough Bread", quantity: "1 loaf", category: "Bakery", checked: false },
+        { id: "4", name: "Avocados", quantity: "3", category: "Produce", checked: true },
+        { id: "5", name: "Greek Yogurt", quantity: "2 tubs", category: "Dairy & Alt", checked: true }
+    ];
+
+    callback toggle-item-check(string /* id */);
+    callback delete-item(string /* id */);
+    callback add-item(string /* name */, int /* qty */);
+    callback trigger-undo();
+    callback toggle-in-store-mode();
+    callback switch-tab(int /* tab */);
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // Top App Bar
+        Rectangle {
+            height: 60px;
+            background: root.dark-mode ? #1e1e1e : #ffffff;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                alignment: space-between;
+
+                Text {
+                    text: root.active-tab == 0 ? "My Lists" : root.active-list-title;
+                    font-size: root.in-store-mode ? 22px : 18px;
+                    font-weight: 700;
+                    color: root.dark-mode ? #ffffff : #111111;
+                    vertical-alignment: center;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+
+                    // In-store mode toggle button (accessible, large touch target)
+                    Rectangle {
+                        width: 48px;
+                        height: 48px;
+                        border-radius: 24px;
+                        background: root.in-store-mode ? #4caf50 : (root.dark-mode ? #2d2d2d : #e0e0e0);
+
+                        TouchArea {
+                            accessible-role: button;
+                            accessible-label: "Toggle in-store mode";
+                            clicked => { root.toggle-in-store-mode(); }
+                        }
+
+                        Text {
+                            text: root.in-store-mode ? "🛒" : "🏬";
+                            font-size: 20px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Main Content Area
+        if root.active-tab == 1 : VerticalLayout {
+            // List detail scroll view
+            ScrollView {
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    // Items
+                    for item in root.items : Rectangle {
+                        visible: !root.in-store-mode || !item.checked;
+                        height: root.in-store-mode ? 68px : 54px;
+                        border-radius: 10px;
+                        background: item.checked ? (root.dark-mode ? #1a1a1a : #f1f3f4) : (root.dark-mode ? #252525 : #ffffff);
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 12px;
+                            alignment: space-between;
+
+                            // Checkbox touch target (>= 48dp)
+                            Rectangle {
+                                width: root.in-store-mode ? 56px : 48px;
+                                height: root.in-store-mode ? 56px : 48px;
+
+                                TouchArea {
+                                    accessible-role: checkbox;
+                                    accessible-label: item.name;
+                                    accessible-checked: item.checked;
+                                    clicked => { root.toggle-item-check(item.id); }
+                                }
+
+                                Text {
+                                    text: item.checked ? "☑" : "☐";
+                                    font-size: root.in-store-mode ? 28px : 22px;
+                                    color: item.checked ? #4caf50 : (root.dark-mode ? #888888 : #666666);
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Item Name and Category
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+
+                                Text {
+                                    text: item.name;
+                                    font-size: root.in-store-mode ? 20px : 16px;
+                                    font-weight: item.checked ? 400 : 600;
+                                    color: item.checked ? #777777 : (root.dark-mode ? #ffffff : #111111);
+                                }
+
+                                Text {
+                                    text: item.category + " • " + item.quantity;
+                                    font-size: root.in-store-mode ? 14px : 12px;
+                                    color: #888888;
+                                }
+                            }
+
+                            // Delete Action button (touch target >= 48dp)
+                            Rectangle {
+                                width: 48px;
+                                height: 48px;
+
+                                TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: "Delete " + item.name;
+                                    clicked => { root.delete-item(item.id); }
+                                }
+
+                                Text {
+                                    text: "✕";
+                                    font-size: 16px;
+                                    color: #e57373;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Undo Toast Notification
+            if root.show-undo-toast : Rectangle {
+                height: 48px;
+                background: #323232;
+                border-radius: 8px;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    alignment: space-between;
+
+                    Text {
+                        text: root.undo-toast-message;
+                        color: #ffffff;
+                        vertical-alignment: center;
+                        font-size: 14px;
+                    }
+
+                    Rectangle {
+                        width: 60px;
+                        height: 36px;
+                        TouchArea {
+                            accessible-role: button;
+                            accessible-label: "Undo deletion";
+                            clicked => { root.trigger-undo(); }
+                        }
+                        Text {
+                            text: "UNDO";
+                            color: #81c784;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // Sticky Bottom Add-Item Bar
+            Rectangle {
+                height: 72px;
+                background: root.dark-mode ? #1e1e1e : #ffffff;
+
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+
+                    input := LineEdit {
+                        text: root.new-item-name;
+                        placeholder-text: "Add item (e.g. Eggs, Coffee)...";
+                        edited(val) => { root.new-item-name = val; }
+                        accepted => {
+                            if (root.new-item-name != "") {
+                                root.add-item(root.new-item-name, root.new-item-qty);
+                                root.new-item-name = "";
+                            }
+                        }
+                    }
+
+                    Button {
+                        text: "Add";
+                        primary: true;
+                        enabled: root.new-item-name != "";
+                        clicked => {
+                            root.add-item(root.new-item-name, root.new-item-qty);
+                            root.new-item-name = "";
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

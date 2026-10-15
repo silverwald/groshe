@@ -4,10 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Android mobile app entry point for Groshe"
+description = "Android mobile app entry point and Slint UI prototype for Groshe"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "groshe-mobile-preview"
+path = "src/main.rs"
 
 [dependencies]
 groshe-core = { workspace = true }
@@ -15,3 +19,7 @@ groshe-sync = { workspace = true }
 groshe-store = { workspace = true }
 slint = { workspace = true }
 tracing.workspace = true
+uuid = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }
