@@ -17,9 +17,14 @@ path = "src/main.rs"
 groshe-core = { workspace = true }
 groshe-sync = { workspace = true }
 groshe-store = { workspace = true }
-slint = { workspace = true }
 tracing.workspace = true
 uuid = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-18", "backend-android-activity-06", "renderer-femtovg"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { workspace = true }
 
 [build-dependencies]
 slint-build = { workspace = true }
