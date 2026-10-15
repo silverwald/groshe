@@ -5,15 +5,15 @@
 set shell := ["powershell.exe", "-NoLogo", "-Command"]
 
 # Android SDK, NDK, and Java paths (auto-fallback to standard local installation paths)
-sdk_dir := env_var_or_default("LOCALAPPDATA", "") + "/Android/Sdk"
-jdk_dir := env_var_or_default("USERPROFILE", "") + "/.jdks/jdk-17.0.20.1+1"
+sdk_dir := env("LOCALAPPDATA", "") + "/Android/Sdk"
+jdk_dir := env("USERPROFILE", "") + "/.jdks/jdk-17.0.20.1+1"
 
-export ANDROID_HOME := env_var_or_default("ANDROID_HOME", sdk_dir)
-export ANDROID_SDK_ROOT := env_var_or_default("ANDROID_SDK_ROOT", sdk_dir)
-export ANDROID_NDK_HOME := env_var_or_default("ANDROID_NDK_HOME", sdk_dir + "/ndk/android-ndk-r26b")
-export ANDROID_NDK_ROOT := env_var_or_default("ANDROID_NDK_ROOT", sdk_dir + "/ndk/android-ndk-r26b")
-export ANDROID_JAR := env_var_or_default("ANDROID_JAR", sdk_dir + "/platforms/android-34/android.jar")
-export JAVA_HOME := env_var_or_default("JAVA_HOME", jdk_dir)
+export ANDROID_HOME := env("ANDROID_HOME", sdk_dir)
+export ANDROID_SDK_ROOT := env("ANDROID_SDK_ROOT", sdk_dir)
+export ANDROID_NDK_HOME := env("ANDROID_NDK_HOME", sdk_dir + "/ndk/android-ndk-r26b")
+export ANDROID_NDK_ROOT := env("ANDROID_NDK_ROOT", sdk_dir + "/ndk/android-ndk-r26b")
+export ANDROID_JAR := env("ANDROID_JAR", sdk_dir + "/platforms/android-34/android.jar")
+export JAVA_HOME := env("JAVA_HOME", jdk_dir)
 
 default: check test
 
