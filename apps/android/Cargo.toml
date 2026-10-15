@@ -17,6 +17,7 @@ path = "src/main.rs"
 groshe-core = { workspace = true }
 groshe-sync = { workspace = true }
 groshe-store = { workspace = true }
+futures-util = "0.3"
 tokio = { workspace = true }
 tracing.workspace = true
 uuid = { workspace = true }
