@@ -2286,9 +2286,12 @@ dependencies = [
  "groshe-core",
  "groshe-store",
  "groshe-sync",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

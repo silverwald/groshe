@@ -15,6 +15,9 @@ groshe-core = { workspace = true }
 groshe-sync = { workspace = true }
 groshe-store = { workspace = true }
 clap = { workspace = true }
+serde = { workspace = true, features = ["alloc"] }
+serde_json.workspace = true
 tokio = { workspace = true }
 tracing.workspace = true
 tracing-subscriber = { workspace = true }
+uuid.workspace = true

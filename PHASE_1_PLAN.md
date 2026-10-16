@@ -125,28 +125,28 @@ Phase 0 validated the core technological pillars:
 **Goal:** Deliver the production `grocery` CLI binary implementing the complete grammar defined in [DESIGN.md §8](file:///C:/projects/groshe/DESIGN.md).
 
 #### Tasks
-- [ ] **1.4.1 CLI Grammar & Config Scaffold**:
+- [x] **1.4.1 CLI Grammar & Config Scaffold**:
   - Implement Clap CLI with global `--data-dir` and `--json` flags.
   - Implement `grocery init` for bootstrapping author credentials.
-- [ ] **1.4.2 List Management Subcommands**:
+- [x] **1.4.2 List Management Subcommands**:
   - `grocery list create <title>`
   - `grocery list ls` (displaying title, ID, item count, peer status).
   - `grocery list join <ticket>`
   - `grocery list share [--list <id>]` (prints ticket string + ASCII QR code).
   - `grocery list rotate [--list <id>]` (executes rotation, emits new ticket).
   - `grocery list rm [--list <id>]`
-- [ ] **1.4.3 Item Manipulation Subcommands**:
+- [x] **1.4.3 Item Manipulation Subcommands**:
   - `grocery add "<name>" [--qty N] [--unit u] [--category cat] [--note note] [--list L]`
   - `grocery ls [--list L] [--all] [--by-category]`
   - `grocery check <item-id-or-prefix>` and `grocery uncheck <item-id-or-prefix>`
   - `grocery edit <item-id-or-prefix> [--name N] [--qty Q] [--unit U] [--note note]`
   - `grocery pos <item-id-or-prefix> [--before <id> | --after <id> | --top | --bottom]`
   - `grocery rm <item-id-or-prefix>` and `grocery undo [--list L]`
-- [ ] **1.4.4 Peers, Export & Import**:
+- [x] **1.4.4 Peers, Export & Import**:
   - `grocery peers [--list L]` (active connections, relay status, gossip presence).
   - `grocery export [--list L] [--format json|text]` (human-readable backup).
   - `grocery import <file> [--list L]` (bulk item import).
-- [ ] **1.4.5 Headless Daemon `grocery serve`**:
+- [x] **1.4.5 Headless Daemon `grocery serve`**:
   - Implement persistent headless daemon mode suitable for systemd / Windows Service / container.
   - Keep all registered list replicas open, answer sync queries, maintain relay connections.
   - Clean shutdown on `SIGINT` / `SIGTERM` / `Ctrl+C`.

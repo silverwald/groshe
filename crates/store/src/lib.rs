@@ -77,6 +77,7 @@ pub struct ItemView {
     pub data: ItemData,
     pub check: ItemCheck,
     pub position: ItemPosition,
+    pub has_data: bool,
     pub data_updated_at: u64,
     pub check_updated_at: u64,
     pub pos_updated_at: u64,
@@ -90,6 +91,7 @@ impl ItemView {
             data,
             check: ItemCheck::unchecked(),
             position: ItemPosition::initial(),
+            has_data: true,
             data_updated_at: timestamp,
             check_updated_at: 0,
             pos_updated_at: 0,
@@ -156,16 +158,16 @@ impl ListProjection {
     }
 
     pub fn item_count(&self) -> usize {
-        self.items.len()
+        self.items.values().filter(|i| i.has_data).count()
     }
 
     pub fn checked_count(&self) -> usize {
-        self.items.values().filter(|i| i.is_checked()).count()
+        self.items.values().filter(|i| i.has_data && i.is_checked()).count()
     }
 
     /// Returns items sorted by their fractional position ascending.
     pub fn sorted_items(&self) -> Vec<&ItemView> {
-        let mut list: Vec<&ItemView> = self.items.values().collect();
+        let mut list: Vec<&ItemView> = self.items.values().filter(|i| i.has_data).collect();
         list.sort_by(|a, b| a.position.cmp(&b.position));
         list
     }
@@ -230,6 +232,7 @@ impl ListProjection {
                 if let Some(existing) = self.items.get_mut(&item_id) {
                     if timestamp >= existing.data_updated_at {
                         existing.data = data;
+                        existing.has_data = true;
                         existing.data_updated_at = timestamp;
                         let item_view = existing.clone();
                         return Ok(Some(StoreEvent::ItemUpdated {
@@ -277,6 +280,7 @@ impl ListProjection {
                         }),
                         0,
                     );
+                    placeholder.has_data = false;
                     placeholder.check = check.clone();
                     placeholder.check_updated_at = timestamp;
                     self.items.insert(item_id, placeholder);
@@ -317,6 +321,7 @@ impl ListProjection {
                         }),
                         0,
                     );
+                    placeholder.has_data = false;
                     placeholder.position = pos.clone();
                     placeholder.pos_updated_at = timestamp;
                     self.items.insert(item_id, placeholder);
