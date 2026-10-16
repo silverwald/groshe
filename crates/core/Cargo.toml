@@ -7,9 +7,11 @@ authors.workspace = true
 description = "Pure Rust domain models, validation, and fractional ordering for Groshe"
 
 [dependencies]
+ciborium.workspace = true
 serde = { workspace = true, features = ["alloc"] }
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v7", "std", "rng"] }
 
 [dev-dependencies]
+proptest.workspace = true
 serde_json.workspace = true

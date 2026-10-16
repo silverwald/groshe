@@ -275,7 +275,7 @@ impl GrosheSyncNode {
         key: impl AsRef<[u8]>,
     ) -> Result<Option<Vec<u8>>, SyncError> {
         let query = Query::single_latest_per_key()
-            .key_exact(key.as_ref().to_vec())
+            .key_exact(key.as_ref())
             .build();
         let entry = doc
             .get_one(query)
@@ -300,7 +300,7 @@ impl GrosheSyncNode {
         prefix: impl AsRef<[u8]>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, SyncError> {
         let query = Query::single_latest_per_key()
-            .key_prefix(prefix.as_ref().to_vec())
+            .key_prefix(prefix.as_ref())
             .build();
         let stream = doc
             .get_many(query)

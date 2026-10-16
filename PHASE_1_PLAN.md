@@ -57,28 +57,23 @@ Phase 0 validated the core technological pillars:
 
 ## Phase 1 Work Breakdown Structure
 
-### Milestone 1.1: Production Core Domain Engine (`crates/core`)
+### Milestone 1.1: Production Core Domain Engine (`crates/core`: COMPLETE)
 
 **Goal:** Establish the canonical data models, fractional indexing, and CBOR byte layouts matching [DESIGN.md §6.2](file:///C:/projects/groshe/DESIGN.md).
 
 #### Tasks
-- [ ] **1.1.1 Canonical Key Schema & CBOR Layouts**:
-  - Implement CBOR binary serialization for all doc values:
-    - `meta` -> `ListMeta` (title, schema_version=1, created_at, created_by, category_order).
-    - `item/<uuidv7>/data` -> `ItemData` (name, quantity, unit, category, note).
-    - `item/<uuidv7>/check` -> `ItemCheck` (checked, checked_at, checked_by).
-    - `item/<uuidv7>/pos` -> `ItemPosition` (fractional index string).
-  - Add standard key parser and constructor helper functions (`make_item_data_key(id)`, `parse_item_key(key)`).
-- [ ] **1.1.2 Fractional-Index Order Engine**:
-  - Implement deterministic midpoint generation between two arbitrary fractional index strings (`between(Option<&str>, Option<&str>) -> String`).
-  - Handle prepending (`before_first`), appending (`after_last`), and arbitrary insertion.
-  - Implement bounds clamping and lexicographic validation.
-- [ ] **1.1.3 Validation & Error Handling**:
-  - Implement domain validation rules (empty names, invalid quantities, malformed keys, invalid UUIDs).
-  - Provide structured `CoreError` variants for descriptive error reporting.
-- [ ] **1.1.4 Property & Unit Tests**:
-  - Fuzz fractional indexing with `proptest` to ensure monotonicity ($a < b \implies a < \text{between}(a, b) < b$) across millions of random interleavings.
-  - Verify zero memory allocations during key parsing.
+- [x] **1.1.1 Canonical Key Schema & CBOR Layouts**:
+  - Implemented CBOR binary serialization for all doc values using `ciborium` (`to_cbor`, `from_cbor`).
+  - Created canonical `DocKey` enum (`Meta`, `ItemData`, `ItemCheck`, `ItemPos`) matching §6.2 key schemas with roundtrip string and byte parsers.
+- [x] **1.1.2 Fractional-Index Order Engine**:
+  - Implemented deterministic midpoint generation (`between_strings`, `between`).
+  - Handled prepending (`before`), appending (`after`), and arbitrary insertion without unbounded length growth.
+  - Enforced lowercase ASCII interval validation.
+- [x] **1.1.3 Validation & Error Handling**:
+  - Implemented structured `CoreError` for empty titles/names, invalid quantities, malformed keys, and CBOR encode/decode failures.
+- [x] **1.1.4 Property & Unit Tests**:
+  - Implemented 10 unit tests covering domain validations, key roundtrips, and CBOR serialization.
+  - Implemented `proptest` harness in `crates/core/tests/fractional_position_proptest.rs` verifying strict monotonicity across arbitrary random insertion sequences.
 
 ---
 

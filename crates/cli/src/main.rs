@@ -175,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let ids = node.list_ids().await?;
                         ids.into_iter()
                             .next()
-                            .ok_or_else(|| "No lists available to share")?
+                            .ok_or("No lists available to share")?
                     };
                     if let Some(doc) = node.open_list(id).await? {
                         let ticket = node.ticket(&doc).await?;
