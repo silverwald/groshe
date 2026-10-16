@@ -214,16 +214,37 @@ impl ListProjection {
 
             DocKey::ItemData(item_id) => {
                 if value_bytes.is_empty() {
-                    // Tombstone: item deleted
-                    if let Some(removed) = self.items.remove(&item_id) {
-                        self.recently_deleted.push(RecentlyDeletedItem {
-                            item: removed,
-                            deleted_at: timestamp,
-                        });
-                        return Ok(Some(StoreEvent::ItemDeleted {
-                            list_id: self.id,
+                    // Tombstone: item deleted with LWW timestamp semantics
+                    if let Some(existing) = self.items.get_mut(&item_id) {
+                        if timestamp >= existing.data_updated_at {
+                            let mut item_snapshot = existing.clone();
+                            item_snapshot.has_data = true;
+                            self.recently_deleted.push(RecentlyDeletedItem {
+                                item: item_snapshot,
+                                deleted_at: timestamp,
+                            });
+                            existing.has_data = false;
+                            existing.data_updated_at = timestamp;
+                            return Ok(Some(StoreEvent::ItemDeleted {
+                                list_id: self.id,
+                                item_id,
+                            }));
+                        }
+                    } else {
+                        // Track tombstone timestamp so older inserts arriving out-of-order are rejected
+                        let mut placeholder = ItemView::new(
                             item_id,
-                        }));
+                            ItemData::new("Deleted item").unwrap_or_else(|_| ItemData {
+                                name: "Deleted".to_string(),
+                                quantity: None,
+                                unit: None,
+                                category: None,
+                                note: None,
+                            }),
+                            timestamp,
+                        );
+                        placeholder.has_data = false;
+                        self.items.insert(item_id, placeholder);
                     }
                     return Ok(None);
                 }
@@ -351,7 +372,8 @@ impl ListProjection {
             self.recently_deleted.len() - 1
         };
 
-        let restored = self.recently_deleted.remove(idx).item;
+        let mut restored = self.recently_deleted.remove(idx).item;
+        restored.has_data = true;
         self.items.insert(restored.id, restored.clone());
         Ok(restored)
     }

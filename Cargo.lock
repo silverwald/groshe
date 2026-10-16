@@ -2311,6 +2311,7 @@ name = "groshe-store"
 version = "0.1.0"
 dependencies = [
  "groshe-core",
+ "proptest",
  "serde",
  "thiserror 2.0.21",
  "tokio",
@@ -2325,6 +2326,7 @@ dependencies = [
  "anyhow",
  "futures-util",
  "groshe-core",
+ "groshe-store",
  "iroh",
  "iroh-blobs",
  "iroh-docs",

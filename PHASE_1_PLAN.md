@@ -158,14 +158,14 @@ Phase 0 validated the core technological pillars:
 **Goal:** Prove 100% data consistency and convergence under adverse network conditions per [DESIGN.md §14](file:///C:/projects/groshe/DESIGN.md).
 
 #### Tasks
-- [ ] **1.5.1 CRDT Property Tests (`proptest`)**:
+- [x] **1.5.1 CRDT Property Tests (`proptest`)**:
   - Generate randomized mutation streams (adds, edits, checks, deletes, reorders).
   - Replay events across 3 simulated replicas with out-of-order delivery, packet drops, and delays.
   - Assert that all replicas converge to identical byte-for-byte materialized state.
-- [ ] **1.5.2 Multi-Peer CLI Convergence Integration Tests**:
+- [x] **1.5.2 Multi-Peer CLI Convergence Integration Tests**:
   - Automated 3-node end-to-end integration test driving separate CLI processes.
   - Simulate concurrent offline edits on Peer 1 and Peer 2, reconnect through Peer 3 (`serve`), and verify clean reconciliation.
-- [ ] **1.5.3 List Rotation Integration Test**:
+- [x] **1.5.3 List Rotation Integration Test**:
   - Verify that a 3-peer list rotation cleanly migrates all items, invalidates old tickets for removed peers, and synchronizes subsequent writes on the new namespace.
 
 ---

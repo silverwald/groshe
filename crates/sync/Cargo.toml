@@ -23,5 +23,6 @@ tokio-stream = "0.1"
 qrcode = { workspace = true }
 
 [dev-dependencies]
+groshe-store = { workspace = true }
 rand = "0.10"
 tempfile = "3.17"
