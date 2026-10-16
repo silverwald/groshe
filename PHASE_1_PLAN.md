@@ -77,27 +77,26 @@ Phase 0 validated the core technological pillars:
 
 ---
 
-### Milestone 1.2: Reactive Materialized Store (`crates/store`)
+### Milestone 1.2: Reactive Materialized Store (`crates/store`: COMPLETE)
 
 **Goal:** Implement the projection layer that reads raw `iroh-docs` entries and maintains a live, queryable `ListProjection` without querying Iroh in render loops.
 
 #### Tasks
-- [ ] **1.2.1 Materialized Document Projection**:
-  - Define `ItemView` merging `ItemData`, `ItemCheck`, and `ItemPosition` by item `Uuid`.
-  - Define `ListProjection` holding active items, categorized views, and ordering.
-  - Implement fast in-memory indexing (`BTreeMap<ItemId, ItemView>` and `BTreeSet<ItemPosition>`).
-- [ ] **1.2.2 Multi-Key Entry Aggregator & LWW Resolution**:
-  - Build aggregator that takes raw key-value events and updates the corresponding component of `ItemView`.
-  - Handle tombstone entries (empty byte payloads) according to §6.3 delete semantics.
-  - Implement field-level Last-Writer-Wins (LWW) conflict reconciliation matching §6.2.
-- [ ] **1.2.3 Recently Deleted / Undo Buffer**:
-  - Maintain an in-memory and persisted 30-day tombstone list (`RecentlyDeletedItem`).
-  - Support restoring deleted items with original metadata and fractional position.
-- [ ] **1.2.4 Reactive Event Channel**:
-  - Create a `tokio::sync::broadcast` stream emitting `StoreEvent` (`ItemAdded`, `ItemUpdated`, `ItemChecked`, `ItemDeleted`, `ListMetaUpdated`, `ListReset`).
-  - Allow frontends (Slint UI, CLI watchers) to subscribe to real-time state mutations.
-- [ ] **1.2.5 Store Integration Tests**:
-  - Test projection reconciliation against recorded raw event streams with out-of-order, duplicate, and clobbering writes.
+- [x] **1.2.1 Materialized Document Projection**:
+  - Defined `ItemView` merging `ItemData`, `ItemCheck`, and `ItemPosition` by item `Uuid` with field-level timestamps.
+  - Defined `ListProjection` holding active items, sorted item views, and category groupings (`items_by_category`).
+  - Implemented fast in-memory indexing (`BTreeMap<ItemId, ItemView>`).
+- [x] **1.2.2 Multi-Key Entry Aggregator & LWW Resolution**:
+  - Built `apply_entry` aggregator resolving raw key-value events into `ItemView` components.
+  - Handled tombstone entries (empty byte payloads) per §6.3 delete semantics.
+  - Implemented field-level Last-Writer-Wins (LWW) timestamp comparisons so check/data/pos updates never clobber each other.
+- [x] **1.2.3 Recently Deleted / Undo Buffer**:
+  - Implemented `RecentlyDeletedItem` 30-day tombstone tracking buffer (`TOMBSTONE_RETENTION_SECS`).
+  - Implemented `restore_deleted` supporting both LIFO undo and ID-specific item restoration.
+- [x] **1.2.4 Reactive Event Channel**:
+  - Built `ReactiveStore` wrapping multiple lists behind `RwLock` with a `tokio::sync::broadcast` channel emitting fine-grained `StoreEvent` notifications.
+- [x] **1.2.5 Store Integration Tests**:
+  - Implemented async multi-key aggregation test verifying non-clobbering updates, LWW rejection of older timestamps, tombstone deletions, and undo restoration.
 
 ---
 

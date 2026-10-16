@@ -10,4 +10,6 @@ description = "Materialized view projection and persistence for Groshe"
 groshe-core = { workspace = true }
 serde = { workspace = true, features = ["alloc"] }
 thiserror.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
 uuid.workspace = true

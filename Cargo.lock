@@ -2310,6 +2310,8 @@ dependencies = [
  "groshe-core",
  "serde",
  "thiserror 2.0.21",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
