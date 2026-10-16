@@ -140,8 +140,11 @@ pub fn spawn_sync_bridge(
                                     id: id.into(),
                                     name: val_string.into(),
                                     quantity: "1".into(),
+                                    unit: "".into(),
                                     category: "General".into(),
+                                    note: "".into(),
                                     checked: false,
+                                    position: "n".into(),
                                 });
                             }
                             app.set_items(ModelRc::new(VecModel::from(current_items)));

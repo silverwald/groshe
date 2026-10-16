@@ -1,257 +1,332 @@
-import { Button, CheckBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Button } from "std-widgets.slint";
+import { Theme, GroceryItemData, GroceryListInfo } from "theme.slint";
+import { ListsScreen } from "lists_screen.slint";
+import { DetailScreen } from "detail_screen.slint";
+import { InStoreScreen } from "in_store_screen.slint";
+import { ShareJoinScreen } from "share_join_screen.slint";
+import { SettingsScreen } from "settings_screen.slint";
 
-export struct GroceryItemData {
-    id: string,
-    name: string,
-    quantity: string,
-    category: string,
-    checked: bool,
-}
-
-export struct GroceryListInfo {
-    id: string,
-    title: string,
-    item_count: int,
-    sync_status: string,
-}
+export { GroceryItemData, GroceryListInfo }
 
 export component AppWindow inherits Window {
-    title: "Groshe - Mobile Preview";
-    min-width: 360px;
-    min-height: 640px;
-    preferred-width: 390px;
-    preferred-height: 800px;
-    background: root.dark-mode ? #121212 : #f8f9fa;
+    title: "Groshe";
+    min_width: 360px;
+    min_height: 640px;
+    preferred_width: 412px;
+    preferred_height: 840px;
+    background: root.dark_mode ? Theme.dark_bg : Theme.light_bg;
 
-    in-out property <bool> dark-mode: true;
-    in-out property <bool> in-store-mode: false;
-    in-out property <int> active-tab: 1; // 0: lists, 1: list detail
-    in-out property <string> new-item-name: "";
-    in-out property <int> new-item-qty: 1;
-    in-out property <string> active-list-title: "Weekly Groceries";
-    in-out property <string> undo-toast-message: "";
-    in-out property <bool> show-undo-toast: false;
+    // State properties
+    in-out property <bool> dark_mode: true;
+    in-out property <int> active_tab: 0; // 0: Lists, 1: Detail, 2: InStore, 3: Share, 4: Settings
+    in-out property <string> active_list_id: "";
+    in-out property <string> active_list_title: "My Groceries";
+    in-out property <string> ticket_str: "";
+    in-out property <string> qr_ascii: "";
+    in-out property <bool> show_undo_toast: false;
+    in-out property <string> undo_toast_message: "";
 
-    in property <[GroceryListInfo]> lists: [
-        { id: "1", title: "Weekly Groceries", item_count: 5, sync_status: "Synced" },
-        { id: "2", title: "Costco Run", item_count: 8, sync_status: "1 peer nearby" }
-    ];
+    // Device / Network state
+    in-out property <string> author_id: "author-local";
+    in-out property <string> node_id: "node-local";
+    in-out property <int> peer_count: 0;
+    in-out property <string> relay_status: "Connected";
 
-    in-out property <[GroceryItemData]> items: [
-        { id: "1", name: "Organic Honeycrisp Apples", quantity: "4", category: "Produce", checked: false },
-        { id: "2", name: "Almond Milk", quantity: "2 cartons", category: "Dairy & Alt", checked: false },
-        { id: "3", name: "Sourdough Bread", quantity: "1 loaf", category: "Bakery", checked: false },
-        { id: "4", name: "Avocados", quantity: "3", category: "Produce", checked: true },
-        { id: "5", name: "Greek Yogurt", quantity: "2 tubs", category: "Dairy & Alt", checked: true }
-    ];
+    // Data models
+    in property <[GroceryListInfo]> lists: [];
+    in-out property <[GroceryItemData]> items: [];
 
-    callback toggle-item-check(string /* id */);
-    callback delete-item(string /* id */);
-    callback add-item(string /* name */, int /* qty */);
-    callback trigger-undo();
-    callback toggle-in-store-mode();
-    callback switch-tab(int /* tab */);
+    // Callbacks to Rust runtime
+    callback select_list(string /* id */, string /* title */);
+    callback create_list(string /* title */);
+    callback delete_list(string /* id */);
+    callback rotate_list(string /* id */);
+    callback share_list(string /* id */);
+    callback toggle_item_check(string /* id */);
+    callback delete_item(string /* id */);
+    callback add_item(string /* raw_input */);
+    callback trigger_undo();
+    callback copy_ticket();
+    callback join_ticket(string /* ticket */);
+    callback prune_tombstones();
 
     VerticalLayout {
         padding: 0px;
         spacing: 0px;
 
-        // Top App Bar
-        Rectangle {
+        // Top App Bar (Hidden in In-Store mode to maximize shopping screen space)
+        if root.active_tab != 2 : Rectangle {
             height: 60px;
-            background: root.dark-mode ? #1e1e1e : #ffffff;
+            background: root.dark_mode ? Theme.dark_surface : Theme.light_surface;
 
             HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                alignment: space-between;
+                padding_left: 16px;
+                padding_right: 16px;
+                alignment: space_between;
 
-                Text {
-                    text: root.active-tab == 0 ? "My Lists" : root.active-list-title;
-                    font-size: root.in-store-mode ? 22px : 18px;
-                    font-weight: 700;
-                    color: root.dark-mode ? #ffffff : #111111;
-                    vertical-alignment: center;
+                // Leading: Back button if in Detail or Share tab, else App title
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+
+                    if root.active_tab == 1 || root.active_tab == 3 : Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        y: 12px;
+                        border_radius: 18px;
+                        background: root.dark_mode ? #2a2a2a : #e0e0e0;
+
+                        TouchArea {
+                            accessible_role: button;
+                            accessible_label: "Go back to lists";
+                            clicked => { root.active_tab = 0; }
+                        }
+
+                        Text {
+                            text: "←";
+                            font_size: 18px;
+                            font_weight: 700;
+                            color: root.dark_mode ? Theme.dark_text : Theme.light_text;
+                            horizontal_alignment: center;
+                            vertical_alignment: center;
+                        }
+                    }
+
+                    Text {
+                        text: root.active_tab == 0 ? "Groshe" :
+                              root.active_tab == 1 ? root.active_list_title :
+                              root.active_tab == 3 ? "Share & Join" : "Settings";
+                        font_size: 20px;
+                        font_weight: 700;
+                        color: root.dark_mode ? Theme.dark_text : Theme.light_text;
+                        vertical_alignment: center;
+                    }
                 }
 
+                // Trailing actions: In-store mode quick trigger or dark mode toggle
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: end;
 
-                    // In-store mode toggle button (accessible, large touch target)
-                    Rectangle {
-                        width: 48px;
-                        height: 48px;
-                        border-radius: 24px;
-                        background: root.in-store-mode ? #4caf50 : (root.dark-mode ? #2d2d2d : #e0e0e0);
+                    if root.active_tab == 1 : Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        y: 8px;
+                        border_radius: 22px;
+                        background: Theme.primary;
 
                         TouchArea {
-                            accessible-role: button;
-                            accessible-label: "Toggle in-store mode";
-                            clicked => { root.toggle-in-store-mode(); }
+                            accessible_role: button;
+                            accessible_label: "Start in-store shopping mode";
+                            clicked => { root.active_tab = 2; }
                         }
 
                         Text {
-                            text: root.in-store-mode ? "🛒" : "🏬";
-                            font-size: 20px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                            text: "🛒";
+                            font_size: 18px;
+                            horizontal_alignment: center;
+                            vertical_alignment: center;
                         }
                     }
                 }
             }
         }
 
-        // Main Content Area
-        if root.active-tab == 1 : VerticalLayout {
-            // List detail scroll view
-            ScrollView {
-                VerticalLayout {
-                    padding: 12px;
-                    spacing: 8px;
+        // Main Screen View Router
+        Rectangle {
+            vertical_stretch: 1;
 
-                    // Items
-                    for item in root.items : Rectangle {
-                        visible: !root.in-store-mode || !item.checked;
-                        height: root.in-store-mode ? 68px : 54px;
-                        border-radius: 10px;
-                        background: item.checked ? (root.dark-mode ? #1a1a1a : #f1f3f4) : (root.dark-mode ? #252525 : #ffffff);
-
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            spacing: 12px;
-                            alignment: space-between;
-
-                            // Checkbox touch target (>= 48dp)
-                            Rectangle {
-                                width: root.in-store-mode ? 56px : 48px;
-                                height: root.in-store-mode ? 56px : 48px;
-
-                                TouchArea {
-                                    accessible-role: checkbox;
-                                    accessible-label: item.name;
-                                    accessible-checked: item.checked;
-                                    clicked => { root.toggle-item-check(item.id); }
-                                }
-
-                                Text {
-                                    text: item.checked ? "☑" : "☐";
-                                    font-size: root.in-store-mode ? 28px : 22px;
-                                    color: item.checked ? #4caf50 : (root.dark-mode ? #888888 : #666666);
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            // Item Name and Category
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 2px;
-
-                                Text {
-                                    text: item.name;
-                                    font-size: root.in-store-mode ? 20px : 16px;
-                                    font-weight: item.checked ? 400 : 600;
-                                    color: item.checked ? #777777 : (root.dark-mode ? #ffffff : #111111);
-                                }
-
-                                Text {
-                                    text: item.category + " • " + item.quantity;
-                                    font-size: root.in-store-mode ? 14px : 12px;
-                                    color: #888888;
-                                }
-                            }
-
-                            // Delete Action button (touch target >= 48dp)
-                            Rectangle {
-                                width: 48px;
-                                height: 48px;
-
-                                TouchArea {
-                                    accessible-role: button;
-                                    accessible-label: "Delete " + item.name;
-                                    clicked => { root.delete-item(item.id); }
-                                }
-
-                                Text {
-                                    text: "✕";
-                                    font-size: 16px;
-                                    color: #e57373;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                    }
+            if root.active_tab == 0 : ListsScreen {
+                dark_mode: root.dark_mode;
+                lists: root.lists;
+                select_list(id, title) => {
+                    root.active_list_id = id;
+                    root.active_list_title = title;
+                    root.active_tab = 1;
+                    root.select_list(id, title);
                 }
+                create_list(title) => { root.create_list(title); }
+                share_list(id) => {
+                    root.active_list_id = id;
+                    root.active_tab = 3;
+                    root.share_list(id);
+                }
+                delete_list(id) => { root.delete_list(id); }
+                rotate_list(id) => { root.rotate_list(id); }
             }
 
-            // Undo Toast Notification
-            if root.show-undo-toast : Rectangle {
-                height: 48px;
-                background: #323232;
-                border-radius: 8px;
+            if root.active_tab == 1 : DetailScreen {
+                dark_mode: root.dark_mode;
+                list_title: root.active_list_title;
+                items: root.items;
+                show_undo_toast: root.show_undo_toast;
+                undo_toast_message: root.undo_toast_message;
+                toggle_item_check(id) => { root.toggle_item_check(id); }
+                delete_item(id) => { root.delete_item(id); }
+                add_item(input) => { root.add_item(input); }
+                trigger_undo() => { root.trigger_undo(); }
+                start_in_store_mode() => { root.active_tab = 2; }
+            }
 
-                HorizontalLayout {
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    alignment: space-between;
+            if root.active_tab == 2 : InStoreScreen {
+                dark_mode: root.dark_mode;
+                list_title: root.active_list_title;
+                items: root.items;
+                toggle_item_check(id) => { root.toggle_item_check(id); }
+                exit_in_store_mode() => { root.active_tab = 1; }
+                finish_shopping() => { root.active_tab = 1; }
+            }
 
-                    Text {
-                        text: root.undo-toast-message;
-                        color: #ffffff;
-                        vertical-alignment: center;
-                        font-size: 14px;
+            if root.active_tab == 3 : ShareJoinScreen {
+                dark_mode: root.dark_mode;
+                active_list_title: root.active_list_title;
+                ticket_str: root.ticket_str;
+                qr_ascii: root.qr_ascii;
+                copy_ticket() => { root.copy_ticket(); }
+                join_ticket(ticket) => { root.join_ticket(ticket); }
+            }
+
+            if root.active_tab == 4 : SettingsScreen {
+                dark_mode: root.dark_mode;
+                author_id: root.author_id;
+                node_id: root.node_id;
+                peer_count: root.peer_count;
+                relay_status: root.relay_status;
+                toggle_dark_mode() => { root.dark_mode = !root.dark_mode; }
+                prune_tombstones() => { root.prune_tombstones(); }
+            }
+        }
+
+        // Bottom Navigation Bar (Hidden in In-Store shopping mode)
+        if root.active_tab != 2 : Rectangle {
+            height: 64px;
+            background: root.dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+            HorizontalLayout {
+                padding_left: 8px;
+                padding_right: 8px;
+                alignment: space_around;
+
+                // Tab 0: Lists
+                Rectangle {
+                    width: 72px;
+                    height: 54px;
+                    border_radius: 8px;
+                    background: root.active_tab == 0 ? (root.dark_mode ? #2a2a2a : #e8f5e9) : #00000000;
+
+                    TouchArea {
+                        accessible_role: button;
+                        accessible_label: "Lists tab";
+                        clicked => { root.active_tab = 0; }
                     }
 
-                    Rectangle {
-                        width: 60px;
-                        height: 36px;
-                        TouchArea {
-                            accessible-role: button;
-                            accessible-label: "Undo deletion";
-                            clicked => { root.trigger-undo(); }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "📋";
+                            font_size: 18px;
+                            horizontal_alignment: center;
                         }
                         Text {
-                            text: "UNDO";
-                            color: #81c784;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                            horizontal-alignment: center;
+                            text: "Lists";
+                            font_size: 11px;
+                            font_weight: root.active_tab == 0 ? 700 : 500;
+                            color: root.active_tab == 0 ? Theme.primary_light : (root.dark_mode ? #888888 : #666666);
+                            horizontal_alignment: center;
                         }
                     }
                 }
-            }
 
-            // Sticky Bottom Add-Item Bar
-            Rectangle {
-                height: 72px;
-                background: root.dark-mode ? #1e1e1e : #ffffff;
+                // Tab 1: Current List
+                Rectangle {
+                    width: 72px;
+                    height: 54px;
+                    border_radius: 8px;
+                    background: root.active_tab == 1 ? (root.dark_mode ? #2a2a2a : #e8f5e9) : #00000000;
 
-                HorizontalLayout {
-                    padding: 10px;
-                    spacing: 8px;
-
-                    input := LineEdit {
-                        text: root.new-item-name;
-                        placeholder-text: "Add item (e.g. Eggs, Coffee)...";
-                        edited(val) => { root.new-item-name = val; }
-                        accepted => {
-                            if (root.new-item-name != "") {
-                                root.add-item(root.new-item-name, root.new-item-qty);
-                                root.new-item-name = "";
-                            }
-                        }
+                    TouchArea {
+                        accessible_role: button;
+                        accessible_label: "Detail tab";
+                        clicked => { root.active_tab = 1; }
                     }
 
-                    Button {
-                        text: "Add";
-                        primary: true;
-                        enabled: root.new-item-name != "";
-                        clicked => {
-                            root.add-item(root.new-item-name, root.new-item-qty);
-                            root.new-item-name = "";
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "🛒";
+                            font_size: 18px;
+                            horizontal_alignment: center;
+                        }
+                        Text {
+                            text: "Items";
+                            font_size: 11px;
+                            font_weight: root.active_tab == 1 ? 700 : 500;
+                            color: root.active_tab == 1 ? Theme.primary_light : (root.dark_mode ? #888888 : #666666);
+                            horizontal_alignment: center;
+                        }
+                    }
+                }
+
+                // Tab 3: Share
+                Rectangle {
+                    width: 72px;
+                    height: 54px;
+                    border_radius: 8px;
+                    background: root.active_tab == 3 ? (root.dark_mode ? #2a2a2a : #e8f5e9) : #00000000;
+
+                    TouchArea {
+                        accessible_role: button;
+                        accessible_label: "Share tab";
+                        clicked => { root.active_tab = 3; }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "🔗";
+                            font_size: 18px;
+                            horizontal_alignment: center;
+                        }
+                        Text {
+                            text: "Share";
+                            font_size: 11px;
+                            font_weight: root.active_tab == 3 ? 700 : 500;
+                            color: root.active_tab == 3 ? Theme.primary_light : (root.dark_mode ? #888888 : #666666);
+                            horizontal_alignment: center;
+                        }
+                    }
+                }
+
+                // Tab 4: Settings
+                Rectangle {
+                    width: 72px;
+                    height: 54px;
+                    border_radius: 8px;
+                    background: root.active_tab == 4 ? (root.dark_mode ? #2a2a2a : #e8f5e9) : #00000000;
+
+                    TouchArea {
+                        accessible_role: button;
+                        accessible_label: "Settings tab";
+                        clicked => { root.active_tab = 4; }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "⚙️";
+                            font_size: 18px;
+                            horizontal_alignment: center;
+                        }
+                        Text {
+                            text: "Settings";
+                            font_size: 11px;
+                            font_weight: root.active_tab == 4 ? 700 : 500;
+                            color: root.active_tab == 4 ? Theme.primary_light : (root.dark_mode ? #888888 : #666666);
+                            horizontal_alignment: center;
                         }
                     }
                 }

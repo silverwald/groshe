@@ -19,15 +19,6 @@ pub fn setup_app_window(
     let last_deleted: Rc<std::cell::RefCell<Option<(usize, GroceryItemData)>>> =
         Rc::new(std::cell::RefCell::new(None));
 
-    let app_weak = app.as_weak();
-    app.on_toggle_in_store_mode(move || {
-        if let Some(app) = app_weak.upgrade() {
-            let current = app.get_in_store_mode();
-            app.set_in_store_mode(!current);
-            tracing::info!("In-store mode toggled: {}", !current);
-        }
-    });
-
     let items_model_clone = items_model.clone();
     let sync_handle_clone = sync_handle.clone();
     app.on_toggle_item_check(move |id| {
@@ -49,20 +40,24 @@ pub fn setup_app_window(
 
     let items_model_clone = items_model.clone();
     let sync_handle_clone = sync_handle.clone();
-    app.on_add_item(move |name, qty| {
+    app.on_add_item(move |raw_input| {
         let id = uuid::Uuid::now_v7().to_string();
+        let name = raw_input.to_string();
         let new_item = GroceryItemData {
             id: id.clone().into(),
-            name: name.clone(),
-            quantity: format!("{}", qty).into(),
+            name: name.clone().into(),
+            quantity: "".into(),
+            unit: "".into(),
             category: "General".into(),
+            note: "".into(),
             checked: false,
+            position: "n".into(),
         };
         items_model_clone.push(new_item);
         sync_handle_clone.send(sync_bridge::SyncCommand::AddItem {
             id,
-            name: name.to_string(),
-            quantity: format!("{}", qty),
+            name,
+            quantity: "".to_string(),
             category: "General".to_string(),
         });
     });

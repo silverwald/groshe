@@ -1,0 +1,129 @@
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export component ShareJoinScreen inherits Rectangle {
+    in property <bool> dark_mode: true;
+    in property <string> active_list_title: "Groceries";
+    in property <string> ticket_str: "";
+    in property <string> qr_ascii: "";
+    in-out property <string> join_input_ticket: "";
+
+    callback copy_ticket();
+    callback join_ticket(string /* ticket */);
+
+    background: dark_mode ? Theme.dark_bg : Theme.light_bg;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 16px;
+            spacing: 20px;
+
+            // Share Section
+            Rectangle {
+                border_radius: 16px;
+                background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Share \"" + root.active_list_title + "\"";
+                        font_size: 18px;
+                        font_weight: 700;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    }
+
+                    Text {
+                        text: "Anyone with this ticket can sync and edit this list peer-to-peer:";
+                        font_size: 13px;
+                        color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                        wrap: word_wrap;
+                    }
+
+                    // Ticket box
+                    Rectangle {
+                        border_radius: 8px;
+                        background: dark_mode ? #151515 : #f0f0f0;
+
+                        HorizontalLayout {
+                            padding: 10px;
+
+                            Text {
+                                text: root.ticket_str != "" ? root.ticket_str : "No ticket loaded";
+                                font_size: 11px;
+                                color: dark_mode ? #a0c2de : #0b57d0;
+                                wrap: char_wrap;
+                            }
+                        }
+                    }
+
+                    Button {
+                        text: "📋 Copy Share Ticket";
+                        primary: true;
+                        enabled: root.ticket_str != "";
+                        clicked => { root.copy_ticket(); }
+                    }
+
+                    // QR Code rendering
+                    if root.qr_ascii != "" : Rectangle {
+                        border_radius: 8px;
+                        background: #ffffff;
+
+                        HorizontalLayout {
+                            padding: 12px;
+
+                            Text {
+                                text: root.qr_ascii;
+                                font_size: 6px;
+                                font_family: "monospace";
+                                color: #000000;
+                                horizontal_alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Join Section
+            Rectangle {
+                border_radius: 16px;
+                background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Join Shared List";
+                        font_size: 18px;
+                        font_weight: 700;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    }
+
+                    Text {
+                        text: "Paste a DocTicket shared by another peer:";
+                        font_size: 13px;
+                        color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                    }
+
+                    input := LineEdit {
+                        text: root.join_input_ticket;
+                        placeholder_text: "docaaaca...";
+                        edited(val) => { root.join_input_ticket = val; }
+                    }
+
+                    Button {
+                        text: "🔗 Join List";
+                        primary: true;
+                        enabled: root.join_input_ticket != "";
+                        clicked => {
+                            root.join_ticket(root.join_input_ticket);
+                            root.join_input_ticket = "";
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

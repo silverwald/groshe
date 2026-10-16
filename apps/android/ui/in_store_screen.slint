@@ -1,0 +1,216 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { Theme, GroceryItemData } from "theme.slint";
+
+export component InStoreScreen inherits Rectangle {
+    in property <bool> dark_mode: true;
+    in property <string> list_title: "Groceries";
+    in property <[GroceryItemData]> items: [];
+
+    callback toggle_item_check(string /* id */);
+    callback exit_in_store_mode();
+    callback finish_shopping();
+
+    background: #000000; // Ultra high-contrast pure black for in-store AMOLED/OLED battery savings
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // Top In-Store Bar
+        Rectangle {
+            height: 64px;
+            background: #1a1a1a;
+
+            HorizontalLayout {
+                padding_left: 16px;
+                padding_right: 16px;
+                alignment: space_between;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+
+                    Text {
+                        text: "🛒 " + root.list_title;
+                        font_size: 20px;
+                        font_weight: 800;
+                        color: #ffffff;
+                    }
+
+                    Text {
+                        text: "In-Store Shopping Mode";
+                        font_size: 12px;
+                        font_weight: 600;
+                        color: Theme.primary_light;
+                    }
+                }
+
+                Button {
+                    text: "Exit";
+                    clicked => { root.exit_in_store_mode(); }
+                }
+            }
+        }
+
+        // Main In-Store List
+        ScrollView {
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+
+                // Active (Unchecked) Items Section
+                Text {
+                    text: "TO BUY";
+                    font_size: 13px;
+                    font_weight: 800;
+                    color: Theme.primary_light;
+                }
+
+                for item in root.items : Rectangle {
+                    visible: !item.checked;
+                    height: Theme.in_store_touch_target + 16px;
+                    border_radius: 14px;
+                    background: #1c1c1c;
+
+                    TouchArea {
+                        accessible_role: checkbox;
+                        accessible_label: item.name;
+                        accessible_checked: item.checked;
+                        clicked => { root.toggle_item_check(item.id); }
+                    }
+
+                    HorizontalLayout {
+                        padding_left: 16px;
+                        padding_right: 16px;
+                        spacing: 16px;
+                        alignment: space_between;
+
+                        // Large checkbox
+                        Rectangle {
+                            width: Theme.in_store_touch_target;
+                            height: Theme.in_store_touch_target;
+
+                            Text {
+                                text: "☐";
+                                font_size: 32px;
+                                color: #ffffff;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                        }
+
+                        // Large item name and quantity
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+
+                            Text {
+                                text: item.name;
+                                font_size: 20px;
+                                font_weight: 700;
+                                color: #ffffff;
+                            }
+
+                            if item.quantity != "" : Text {
+                                text: item.quantity + (item.unit != "" ? " " + item.unit : "");
+                                font_size: 15px;
+                                font_weight: 500;
+                                color: #ffb74d; // High visibility amber
+                            }
+                        }
+
+                        // Category chip
+                        if item.category != "" : Rectangle {
+                            background: #2a2a2a;
+                            border_radius: 6px;
+                            height: 28px;
+                            y: 22px;
+
+                            HorizontalLayout {
+                                padding_left: 8px;
+                                padding_right: 8px;
+
+                                Text {
+                                    text: item.category;
+                                    font_size: 12px;
+                                    font_weight: 600;
+                                    color: #cccccc;
+                                    vertical_alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Checked / Done Section
+                Rectangle { height: 16px; }
+
+                Text {
+                    text: "PURCHASED (IN CART)";
+                    font_size: 13px;
+                    font_weight: 800;
+                    color: #777777;
+                }
+
+                for item in root.items : Rectangle {
+                    visible: item.checked;
+                    height: 54px;
+                    border_radius: 10px;
+                    background: #121212;
+
+                    TouchArea {
+                        accessible_role: checkbox;
+                        accessible_label: item.name;
+                        accessible_checked: item.checked;
+                        clicked => { root.toggle_item_check(item.id); }
+                    }
+
+                    HorizontalLayout {
+                        padding_left: 16px;
+                        padding_right: 16px;
+                        spacing: 12px;
+                        alignment: space_between;
+
+                        Text {
+                            text: "☑";
+                            font_size: 24px;
+                            color: Theme.primary_light;
+                            vertical_alignment: center;
+                        }
+
+                        Text {
+                            text: item.name;
+                            font_size: 16px;
+                            color: #666666;
+                            vertical_alignment: center;
+                        }
+
+                        Text {
+                            text: item.quantity != "" ? item.quantity : "";
+                            font_size: 14px;
+                            color: #555555;
+                            vertical_alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Bottom Finish Button
+        Rectangle {
+            height: 68px;
+            background: #1a1a1a;
+
+            HorizontalLayout {
+                padding: 12px;
+                alignment: center;
+
+                Button {
+                    text: "✓ Finish Shopping";
+                    primary: true;
+                    clicked => { root.finish_shopping(); }
+                }
+            }
+        }
+    }
+}
