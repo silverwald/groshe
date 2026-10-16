@@ -372,6 +372,7 @@ appears.
 
 ## Changelog
 
+- 2026-10-16 — Phase 1 completed: Core domain engine (CBOR serialization, fractional position ordering), Reactive projection store (LWW conflict resolution, tombstone retention, event broadcasting), Iroh sync engine (identity persistence, doc tickets, QR codes, gossip presence, list rotation), full-peer CLI binary (`grocery`), CRDT property testing suite (`proptest`), and 3-peer convergence integration verification. Ready for Phase 2 (Android MVP).
 - 2026-10-15 — Spike 0.4 completed on `crates/core`. Buck2 build, test, and `rust-project.json` generation verified. Performance (Cargo 455ms vs Buck2 885ms incremental) and Windows Developer Mode symlink friction evaluated. Decision: **DELETE** (all BUCK files removed; no zombie build system). Cargo remains canonical.
 - 2026-10-14 — Initial version. Decisions recorded: no GPUI; Slint UI;
   iroh-docs as the CRDT; Cargo canonical with a time-boxed Buck2 spike on

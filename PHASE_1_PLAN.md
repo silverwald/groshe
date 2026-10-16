@@ -1,6 +1,6 @@
 # Phase 1 Detailed Execution Plan: Core, Store, Sync, and CLI Full Peer
 
-**Status:** Ready to Execute  
+**Status:** 100% COMPLETE (Phase 1 Exit Achieved; Ready for Phase 2: Android MVP)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) § 15 (Phase 1)  
 **Target Platform Priority:** Host Workstations (CLI Full Peer), Android, Cross-Platform Engine  
 
@@ -120,7 +120,7 @@ Phase 0 validated the core technological pillars:
 
 ---
 
-### Milestone 1.4: Full-Peer CLI Application (`crates/cli`)
+### Milestone 1.4: Full-Peer CLI Application (`crates/cli`: COMPLETE)
 
 **Goal:** Deliver the production `grocery` CLI binary implementing the complete grammar defined in [DESIGN.md §8](file:///C:/projects/groshe/DESIGN.md).
 
@@ -153,7 +153,7 @@ Phase 0 validated the core technological pillars:
 
 ---
 
-### Milestone 1.5: Property Testing & Multi-Peer Convergence Verification
+### Milestone 1.5: Property Testing & Multi-Peer Convergence Verification (COMPLETE)
 
 **Goal:** Prove 100% data consistency and convergence under adverse network conditions per [DESIGN.md §14](file:///C:/projects/groshe/DESIGN.md).
 
