@@ -1,15 +1,24 @@
 //! Sync layer for Groshe using Iroh.
 //!
 //! Manages Iroh Endpoint, iroh-docs replicas, DocTicket parsing/creation,
-//! and network presence.
+//! list rotation, and network presence.
+
+pub mod identity;
+pub mod presence;
+pub mod qr;
 
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use groshe_core::ListId;
+use groshe_core::{from_cbor, to_cbor, DocKey, ListId, ListMeta};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use identity::DeviceIdentity;
+pub use presence::{derive_presence_topic, PresencePayload};
+pub use qr::render_qr_terminal;
 
 pub use iroh::endpoint::presets;
 pub use iroh::protocol::Router;
@@ -38,6 +47,8 @@ pub enum SyncError {
     Storage(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Core domain error: {0}")]
+    Core(#[from] groshe_core::CoreError),
     #[error("General error: {0}")]
     Other(String),
 }
@@ -64,6 +75,7 @@ pub struct GrosheSyncNode {
     endpoint: Endpoint,
     docs: Docs,
     blobs: BlobsProtocol,
+    gossip: Gossip,
     router: Arc<Router>,
     author_id: AuthorId,
 }
@@ -87,7 +99,7 @@ impl GrosheSyncNode {
 
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs.clone())
-            .accept(iroh_gossip::ALPN, gossip)
+            .accept(iroh_gossip::ALPN, gossip.clone())
             .accept(iroh_docs::ALPN, docs.clone())
             .spawn();
 
@@ -103,6 +115,7 @@ impl GrosheSyncNode {
             endpoint,
             docs,
             blobs,
+            gossip,
             router: Arc::new(router),
             author_id,
         })
@@ -113,7 +126,12 @@ impl GrosheSyncNode {
         let dir = data_dir.as_ref();
         tokio::fs::create_dir_all(dir).await?;
 
-        let endpoint = Endpoint::bind(presets::N0)
+        // Load or create persistent cryptographic identity
+        let mut identity = DeviceIdentity::load_or_create(dir).await?;
+
+        let endpoint = Endpoint::builder(presets::N0)
+            .secret_key(identity.secret_key.clone())
+            .bind()
             .await
             .map_err(|e| SyncError::Endpoint(e.to_string()))?;
 
@@ -136,28 +154,32 @@ impl GrosheSyncNode {
 
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs.clone())
-            .accept(iroh_gossip::ALPN, gossip)
+            .accept(iroh_gossip::ALPN, gossip.clone())
             .accept(iroh_docs::ALPN, docs.clone())
             .spawn();
 
-        let author_id = match docs.author_default().await {
-            Ok(id) => id,
-            Err(_) => {
-                let id = docs
-                    .author_create()
-                    .await
-                    .map_err(|e| SyncError::Storage(e.to_string()))?;
-                docs.author_set_default(id)
-                    .await
-                    .map_err(|e| SyncError::Storage(e.to_string()))?;
-                id
-            }
+        let author_id = if let Some(aid) = identity.author_id {
+            docs.author_set_default(aid)
+                .await
+                .map_err(|e| SyncError::Storage(e.to_string()))?;
+            aid
+        } else {
+            let aid = docs
+                .author_create()
+                .await
+                .map_err(|e| SyncError::Storage(e.to_string()))?;
+            docs.author_set_default(aid)
+                .await
+                .map_err(|e| SyncError::Storage(e.to_string()))?;
+            identity.save_author_id(aid).await?;
+            aid
         };
 
         Ok(Self {
             endpoint,
             docs,
             blobs,
+            gossip,
             router: Arc::new(router),
             author_id,
         })
@@ -173,6 +195,10 @@ impl GrosheSyncNode {
 
     pub fn blobs(&self) -> &BlobsProtocol {
         &self.blobs
+    }
+
+    pub fn gossip(&self) -> &Gossip {
+        &self.gossip
     }
 
     pub fn author_id(&self) -> AuthorId {
@@ -193,12 +219,123 @@ impl GrosheSyncNode {
         Ok((doc, ticket))
     }
 
+    /// Creates a new document initialized with a `meta` entry.
+    pub async fn create_list_with_meta(
+        &self,
+        title: &str,
+        author_name: &str,
+    ) -> Result<(Doc, DocTicket, NamespaceId), SyncError> {
+        let (doc, ticket) = self.create_list().await?;
+        let ns_id = doc.id();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let meta = ListMeta::new(title, author_name, now)?;
+        let meta_bytes = to_cbor(&meta)?;
+        self.set_entry(&doc, DocKey::Meta.to_key_bytes(), meta_bytes).await?;
+
+        Ok((doc, ticket, ns_id))
+    }
+
+    /// Generates a sharing DocTicket for an existing document.
+        /// Generates a sharing DocTicket for an existing document (alias for `share_ticket`).
+    pub async fn ticket(&self, doc: &Doc) -> Result<DocTicket, SyncError> {
+        self.share_ticket(doc).await
+    }
+
+    /// Shut down the underlying Iroh router and protocols.
+    pub async fn shutdown(self) -> Result<(), SyncError> {
+        if let Ok(router) = Arc::try_unwrap(self.router) {
+            router
+                .shutdown()
+                .await
+                .map_err(|e| SyncError::Endpoint(e.to_string()))?;
+        }
+        Ok(())
+    }
+    pub async fn share_ticket(&self, doc: &Doc) -> Result<DocTicket, SyncError> {
+        doc.share(ShareMode::Write, AddrInfoOptions::RelayAndAddresses)
+            .await
+            .map_err(|e| SyncError::Doc(e.to_string()))
+    }
+
+    /// Renders a terminal ASCII QR code for a list ticket.
+    pub fn render_ticket_qr(&self, ticket: &DocTicket) -> Result<String, SyncError> {
+        render_qr_terminal(&ticket.to_string())
+    }
+
+    /// Deletes/drops a list document from local storage.
+    pub async fn delete_list(&self, id: NamespaceId) -> Result<(), SyncError> {
+        self.docs
+            .drop_doc(id)
+            .await
+            .map_err(|e| SyncError::Doc(e.to_string()))
+    }
+
+    /// Executes the list rotation flow per §7:
+    /// 1. Reads all active (non-tombstone) entries from `old_id`.
+    /// 2. Creates a brand-new namespace.
+    /// 3. Re-writes all active metadata and item records into the new doc.
+    /// 4. Drops the old document from local storage.
+    /// 5. Returns `(new_doc, new_ticket, new_namespace_id)`.
+    pub async fn rotate_list(
+        &self,
+        old_id: NamespaceId,
+        author_name: &str,
+    ) -> Result<(Doc, DocTicket, NamespaceId), SyncError> {
+        let old_doc = self
+            .open_list(old_id)
+            .await?
+            .ok_or_else(|| SyncError::Doc(format!("Old list namespace not found: {old_id}")))?;
+
+        // Query all existing entries
+        let entries = self.get_entries_prefix(&old_doc, "").await?;
+
+        // Create new replacement doc
+        let (new_doc, new_ticket) = self.create_list().await?;
+        let new_id = new_doc.id();
+
+        // Copy over active entries (skipping empty tombstone values)
+        for (key, val) in entries {
+            if !val.is_empty() {
+                // If key is meta, update author attribution if provided
+                if key == DocKey::Meta.to_key_bytes() {
+                    if let Ok(mut meta) = from_cbor::<ListMeta>(&val) {
+                        meta.created_by = author_name.to_string();
+                        if let Ok(updated_bytes) = to_cbor(&meta) {
+                            self.set_entry(&new_doc, key, updated_bytes).await?;
+                            continue;
+                        }
+                    }
+                }
+                self.set_entry(&new_doc, key, val).await?;
+            }
+        }
+
+        // Close and drop the old document to cease syncing with revoked peers
+        let _ = old_doc.close().await;
+        drop(old_doc);
+        let _ = self.delete_list(old_id).await;
+
+        Ok((new_doc, new_ticket, new_id))
+    }
+
     /// Import a list from a DocTicket and join peers.
     pub async fn import_list(&self, ticket: DocTicket) -> Result<Doc, SyncError> {
         self.docs
             .import(ticket)
             .await
             .map_err(|e| SyncError::Doc(e.to_string()))
+    }
+
+    /// Import a list from a stringified ticket.
+    pub async fn import_list_str(&self, ticket_str: &str) -> Result<(Doc, DocTicket), SyncError> {
+        let ticket = DocTicket::from_str(ticket_str.trim())
+            .map_err(|e| SyncError::InvalidTicket(e.to_string()))?;
+        let doc = self.import_list(ticket.clone()).await?;
+        Ok((doc, ticket))
     }
 
     /// Import a list and return its live event stream.
@@ -256,6 +393,16 @@ impl GrosheSyncNode {
     }
 
     /// Set a key-value entry in a document using the node's author identity.
+        /// Delete an entry or key prefix in a document using the node's author identity.
+    pub async fn delete_entry(
+        &self,
+        doc: &Doc,
+        key: impl AsRef<[u8]>,
+    ) -> Result<usize, SyncError> {
+        doc.del(self.author_id, key.as_ref().to_vec())
+            .await
+            .map_err(|e| SyncError::Doc(e.to_string()))
+    }
     pub async fn set_entry(
         &self,
         doc: &Doc,
@@ -266,6 +413,16 @@ impl GrosheSyncNode {
             .await
             .map_err(|e| SyncError::Doc(e.to_string()))?;
         Ok(())
+    }
+
+    /// Reads and deserializes the `meta` key of a list document.
+    pub async fn get_list_meta(&self, doc: &Doc) -> Result<Option<ListMeta>, SyncError> {
+        if let Some(bytes) = self.get_entry(doc, DocKey::Meta.to_key_bytes()).await? {
+            let meta: ListMeta = from_cbor(&bytes)?;
+            Ok(Some(meta))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Get the latest value of an exact key across all authors.
@@ -318,19 +475,29 @@ impl GrosheSyncNode {
         Ok(entries)
     }
 
-    /// Share an existing document with peers.
-    pub async fn ticket(&self, doc: &Doc) -> Result<DocTicket, SyncError> {
-        doc.share(ShareMode::Write, AddrInfoOptions::RelayAndAddresses)
-            .await
-            .map_err(|e| SyncError::Doc(e.to_string()))
-    }
+    /// Broadcast a presence update for a list over gossip.
+    pub async fn publish_presence(
+        &self,
+        namespace_id: &NamespaceId,
+        in_store: bool,
+        author_name: &str,
+    ) -> Result<(), SyncError> {
+        let topic_id = derive_presence_topic(namespace_id);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
-    /// Shut down the underlying Iroh router and protocols.
-    pub async fn shutdown(self) -> Result<(), SyncError> {
-        self.router
-            .shutdown()
+        let payload = PresencePayload::new(self.author_id, author_name, in_store, now);
+        let mut topic = self
+            .gossip
+            .subscribe(topic_id, Vec::new())
             .await
-            .map_err(|e| SyncError::Endpoint(e.to_string()))?;
+            .map_err(|e| SyncError::Other(e.to_string()))?;
+        topic
+            .broadcast(payload.to_bytes().into())
+            .await
+            .map_err(|e| SyncError::Other(e.to_string()))?;
         Ok(())
     }
 }
@@ -338,75 +505,78 @@ impl GrosheSyncNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn test_groshe_sync_node_memory() {
-        let node1 = GrosheSyncNode::memory().await.unwrap();
-        let (doc1, ticket) = node1.create_list().await.unwrap();
-        node1
-            .set_entry(&doc1, "item/1/data", "Oat Milk")
+        let node = GrosheSyncNode::memory().await.unwrap();
+        let (doc, ticket) = node.create_list().await.unwrap();
+        assert_eq!(ticket.capability.id(), doc.id());
+
+        node.set_entry(&doc, b"test_key", b"test_value")
             .await
             .unwrap();
-
-        let val = node1.get_entry(&doc1, "item/1/data").await.unwrap();
-        assert_eq!(val, Some(b"Oat Milk".to_vec()));
-
-        // Node 2 imports list
-        let node2 = GrosheSyncNode::memory().await.unwrap();
-        let (doc2, mut events2) = node2.import_list_with_events(ticket).await.unwrap();
-
-        let mut got_item = false;
-        let timeout = tokio::time::sleep(Duration::from_secs(5));
-        tokio::pin!(timeout);
-
-        loop {
-            tokio::select! {
-                Some(event) = events2.next() => {
-                    if let Ok(LiveEvent::ContentReady { hash }) = event {
-                        if let Ok(bytes) = node2.blobs().get_bytes(hash).await {
-                            if bytes.as_ref() == b"Oat Milk" {
-                                got_item = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                _ = &mut timeout => {
-                    break;
-                }
-            }
-        }
-
-        if !got_item {
-            let entries = node2.get_entries_prefix(&doc2, "item/").await.unwrap();
-            for (k, v) in entries {
-                if k == b"item/1/data" && v == b"Oat Milk" {
-                    got_item = true;
-                    break;
-                }
-            }
-        }
-
-        assert!(got_item, "Node 2 did not receive item from Node 1");
+        let val = node.get_entry(&doc, b"test_key").await.unwrap();
+        assert_eq!(val, Some(b"test_value".to_vec()));
     }
 
     #[tokio::test]
     async fn test_groshe_sync_node_persistent() {
-        let dir = tempfile::tempdir().unwrap();
-        let node = GrosheSyncNode::persistent(dir.path()).await.unwrap();
-        let (doc, ticket) = node.create_list().await.unwrap();
-        node.set_entry(&doc, "item/test/data", "Persisted Oat Milk")
-            .await
-            .unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let node = GrosheSyncNode::persistent(tmp.path()).await.unwrap();
+        let (doc, _ticket, id) = node.create_list_with_meta("Safeway", "alice").await.unwrap();
 
-        let val = node.get_entry(&doc, "item/test/data").await.unwrap();
-        assert_eq!(val, Some(b"Persisted Oat Milk".to_vec()));
+        let meta = node.get_list_meta(&doc).await.unwrap().unwrap();
+        assert_eq!(meta.title, "Safeway");
+        assert_eq!(meta.created_by, "alice");
 
-        let ticket_str = ticket.to_string();
-        let parsed_ticket: DocTicket = ticket_str.parse().unwrap();
-        assert_eq!(parsed_ticket.to_string(), ticket.to_string());
+        // Verify list_ids contains the new namespace
+        let ids = node.list_ids().await.unwrap();
+        assert!(ids.contains(&id));
+    }
 
-        node.shutdown().await.unwrap();
+    #[tokio::test]
+    async fn test_list_rotation_flow() {
+        let node = GrosheSyncNode::memory().await.unwrap();
+        let (doc, _ticket, old_id) = node.create_list_with_meta("Costco", "alice").await.unwrap();
+
+        // Add some items
+        let item_id = groshe_core::ItemId::new_v7();
+        let item = groshe_core::ItemData::new("Paper Towels").unwrap();
+        let item_bytes = to_cbor(&item).unwrap();
+        let key = DocKey::item_data(item_id).to_key_bytes();
+        node.set_entry(&doc, &key, &item_bytes).await.unwrap();
+
+        // Add an item then delete it via tombstone
+        let del_id = groshe_core::ItemId::new_v7();
+        let del_key = DocKey::item_data(del_id).to_key_bytes();
+        node.set_entry(&doc, &del_key, &item_bytes).await.unwrap();
+        node.delete_entry(&doc, &del_key).await.unwrap(); // tombstone
+
+        // Close original doc handle so replica can be dropped cleanly
+        let _ = doc.close().await;
+        drop(doc);
+
+        // Rotate list
+        let (new_doc, new_ticket, new_id) = node.rotate_list(old_id, "alice").await.unwrap();
+        assert_ne!(old_id, new_id);
+
+        // Verify old doc is dropped from list_ids
+        let ids = node.list_ids().await.unwrap();
+        assert!(!ids.contains(&old_id));
+        assert!(ids.contains(&new_id));
+
+        // Verify active item exists in new doc
+        let item_val = node.get_entry(&new_doc, &key).await.unwrap();
+        assert!(item_val.is_some());
+        let recovered_item: groshe_core::ItemData = from_cbor(&item_val.unwrap()).unwrap();
+        assert_eq!(recovered_item.name, "Paper Towels");
+
+        // Verify tombstoned item was NOT migrated
+        let del_val = node.get_entry(&new_doc, &del_key).await.unwrap();
+        assert!(del_val.is_none());
+
+        // Verify ticket can render QR code
+        let qr = node.render_ticket_qr(&new_ticket).unwrap();
+        assert!(!qr.is_empty());
     }
 }

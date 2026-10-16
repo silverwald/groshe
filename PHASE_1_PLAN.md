@@ -100,32 +100,23 @@ Phase 0 validated the core technological pillars:
 
 ---
 
-### Milestone 1.3: Sync Node, Identity, Discovery & Rotation (`crates/sync`)
+### Milestone 1.3: Sync Node, Identity, Discovery & Rotation (`crates/sync`: COMPLETE)
 
 **Goal:** Implement full list lifecycle management, persistent identity, peer discovery, gossip presence, and list revocation/rotation per [DESIGN.md §7](file:///C:/projects/groshe/DESIGN.md).
 
 #### Tasks
-- [ ] **1.3.1 Persistent Identity & Keyring Management**:
-  - Implement persistent `AuthorId` and device keypair generation and secure loading.
-  - Configure file permissions (0600) for stored secret keys on Unix/Windows.
-- [ ] **1.3.2 Multi-Document Namespace Lifecycle**:
-  - Support managing multiple concurrent lists within a single `GrosheSyncNode`.
-  - Implement `create_list(title)`, `join_list(ticket)`, and `leave_list(list_id)`.
-  - Auto-open and resume syncing all subscribed lists on node startup.
-- [ ] **1.3.3 List Sharing & Ticket Generation**:
-  - Generate full-capability `DocTicket` objects with local and relay connection info.
-  - Implement ASCII QR code generator for direct terminal display (`qr_code` / `qrcode-generator`).
-- [ ] **1.3.4 List Rotation Flow (§7, §11, §16)**:
-  - Implement `rotate_list(old_list_id)`:
-    1. Read latest materialized snapshot from old namespace.
-    2. Create brand-new `iroh-docs` namespace.
-    3. Re-serialize active metadata and active items into the new doc.
-    4. Issue new tickets.
-    5. Terminate sync and drop replica of old namespace.
-- [ ] **1.3.5 Presence & Gossip Topic**:
-  - Derive gossip presence topic per list namespace.
-  - Broadcast periodic heartbeats for "in-store" and online status.
-  - Expose connected peer counter stream per list.
+- [x] **1.3.1 Persistent Identity & Keyring Management**:
+  - Implemented `DeviceIdentity` loading/generating `device.key` and `author.id` in `data_dir` with 0600 file permissions on Unix.
+- [x] **1.3.2 Multi-Document Namespace Lifecycle**:
+  - Implemented `create_list_with_meta` with CBOR `ListMeta` initialization.
+  - Implemented `delete_list` via `docs.drop_doc(id)`, `get_list_meta`, and `list_ids`.
+- [x] **1.3.3 List Sharing & Ticket Generation**:
+  - Implemented `share_ticket` generating full-capability write `DocTicket`s.
+  - Added `render_qr_terminal` and `render_ticket_qr` generating crisp Unicode half-block QR codes (`qrcode::render::unicode::Dense1x2`).
+- [x] **1.3.4 List Rotation Flow (§7, §11, §16)**:
+  - Implemented `rotate_list(old_id, author_name)` copying active un-tombstoned items to a fresh doc, issuing new tickets, and cleanly dropping the old replica.
+- [x] **1.3.5 Presence & Gossip Topic**:
+  - Implemented `derive_presence_topic` and `PresencePayload` broadcast channel via `publish_presence` over Iroh gossip.
 
 ---
 

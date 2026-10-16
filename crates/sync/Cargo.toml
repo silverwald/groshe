@@ -20,6 +20,7 @@ iroh-gossip = "0.101"
 iroh-docs = { version = "0.101", features = ["fs-store"] }
 futures-util = "0.3"
 tokio-stream = "0.1"
+qrcode = { workspace = true }
 
 [dev-dependencies]
 rand = "0.10"

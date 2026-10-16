@@ -42,6 +42,7 @@ slint-build = "1.18"
 
 # Testing
 proptest = "1.5"
+qrcode = { version = "0.14", default-features = false }
 
 [profile.release]
 opt-level = 3
