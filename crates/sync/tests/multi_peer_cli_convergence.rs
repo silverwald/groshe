@@ -42,6 +42,41 @@ async fn wait_for_item_count(
     ))
 }
 
+async fn wait_for_item_order(
+    node: &GrosheSyncNode,
+    doc: &Doc,
+    list_id: ListId,
+    expected_order: &[ItemId],
+    timeout: Duration,
+) -> Result<ListProjection, String> {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if let Ok(entries) = node.get_entries_prefix(doc, "").await {
+            let mut proj = ListProjection::new(list_id);
+            for (k, v) in entries {
+                let _ = proj.apply_entry(&k, &v, 0);
+            }
+            if proj.item_count() == expected_order.len() {
+                let ids: Vec<ItemId> = proj.sorted_items().iter().map(|i| i.id).collect();
+                if ids == expected_order {
+                    return Ok(proj);
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let entries = node.get_entries_prefix(doc, "").await.unwrap_or_default();
+    let mut proj = ListProjection::new(list_id);
+    for (k, v) in entries {
+        let _ = proj.apply_entry(&k, &v, 0);
+    }
+    let ids: Vec<ItemId> = proj.sorted_items().iter().map(|i| i.id).collect();
+    Err(format!(
+        "Timed out waiting for item order {:?}, current order is {:?}",
+        expected_order, ids
+    ))
+}
+
 async fn wait_for_checked_count(
     node: &GrosheSyncNode,
     doc: &Doc,
@@ -188,16 +223,25 @@ async fn test_three_peer_cli_convergence_and_reconciliation() {
         .await
         .unwrap();
 
-    // 6. Verify all 3 peers converge to 3 items
-    let proj_alice = wait_for_item_count(&node_alice, &doc_alice, list_id, 3, timeout)
-        .await
-        .unwrap();
-    let proj_daemon = wait_for_item_count(&node_daemon, &doc_daemon, list_id, 3, timeout)
-        .await
-        .unwrap();
-    let proj_charlie = wait_for_item_count(&node_charlie, &doc_charlie, list_id, 3, timeout)
-        .await
-        .unwrap();
+    // 6. Verify all 3 peers converge to 3 items in the exact expected position order
+    let expected_order = vec![id_charcoal, id_buns, id_steaks];
+    let proj_alice =
+        wait_for_item_order(&node_alice, &doc_alice, list_id, &expected_order, timeout)
+            .await
+            .unwrap();
+    let proj_daemon =
+        wait_for_item_order(&node_daemon, &doc_daemon, list_id, &expected_order, timeout)
+            .await
+            .unwrap();
+    let proj_charlie = wait_for_item_order(
+        &node_charlie,
+        &doc_charlie,
+        list_id,
+        &expected_order,
+        timeout,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(proj_alice.item_count(), 3);
     assert_eq!(proj_daemon.item_count(), 3);
@@ -208,7 +252,7 @@ async fn test_three_peer_cli_convergence_and_reconciliation() {
     let ids_daemon: Vec<ItemId> = proj_daemon.sorted_items().iter().map(|i| i.id).collect();
     let ids_charlie: Vec<ItemId> = proj_charlie.sorted_items().iter().map(|i| i.id).collect();
 
-    assert_eq!(ids_alice, vec![id_charcoal, id_buns, id_steaks]);
+    assert_eq!(ids_alice, expected_order);
     assert_eq!(ids_daemon, ids_alice);
     assert_eq!(ids_charlie, ids_alice);
 

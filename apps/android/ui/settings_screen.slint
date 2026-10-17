@@ -1,0 +1,143 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export component SettingsScreen inherits Rectangle {
+    in property <bool> dark_mode: true;
+    in property <string> author_id: "unknown";
+    in property <string> node_id: "unknown";
+    in property <int> peer_count: 0;
+    in property <string> relay_status: "Active";
+
+    callback toggle_dark_mode();
+    callback prune_tombstones();
+
+    background: dark_mode ? Theme.dark_bg : Theme.light_bg;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 16px;
+            spacing: 16px;
+
+            // Identity Section
+            Rectangle {
+                border_radius: 16px;
+                background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+
+                    Text {
+                        text: "Device Identity";
+                        font_size: 17px;
+                        font_weight: 700;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    }
+
+                    Text {
+                        text: "Author ID:";
+                        font_size: 12px;
+                        font_weight: 600;
+                        color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                    }
+
+                    Text {
+                        text: root.author_id;
+                        font_size: 13px;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    }
+
+                    Text {
+                        text: "Node Public Key:";
+                        font_size: 12px;
+                        font_weight: 600;
+                        color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                    }
+
+                    Text {
+                        text: root.node_id;
+                        font_size: 13px;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                        wrap: char_wrap;
+                    }
+                }
+            }
+
+            // Network Section
+            Rectangle {
+                border_radius: 16px;
+                background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+
+                    Text {
+                        text: "P2P Network Status";
+                        font_size: 17px;
+                        font_weight: 700;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    }
+
+                    HorizontalLayout {
+                        alignment: space_between;
+                        Text {
+                            text: "Active Mesh Peers:";
+                            font_size: 14px;
+                            color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                        }
+                        Text {
+                            text: root.peer_count + " online";
+                            font_size: 14px;
+                            font_weight: 600;
+                            color: root.peer_count > 0 ? Theme.primary_light : (dark_mode ? #888888 : #666666);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: space_between;
+                        Text {
+                            text: "WAN Relay Connection:";
+                            font_size: 14px;
+                            color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                        }
+                        Text {
+                            text: root.relay_status;
+                            font_size: 14px;
+                            font_weight: 600;
+                            color: Theme.primary_light;
+                        }
+                    }
+                }
+            }
+
+            // Preferences & Storage Section
+            Rectangle {
+                border_radius: 16px;
+                background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Preferences & Storage";
+                        font_size: 17px;
+                        font_weight: 700;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    }
+
+                    Button {
+                        text: root.dark_mode ? "☀️ Switch to Light Mode" : "🌙 Switch to Dark Mode";
+                        clicked => { root.toggle_dark_mode(); }
+                    }
+
+                    Button {
+                        text: "🧹 Prune Old Tombstones (>30 days)";
+                        clicked => { root.prune_tombstones(); }
+                    }
+                }
+            }
+        }
+    }
+}

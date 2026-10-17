@@ -69,3 +69,25 @@ android-run TARGET="arm64-v8a" PROFILE="release":
 # Launch the interactive Slint mobile preview
 android-preview:
     cargo run -p groshe-android
+
+# List installed Android Virtual Devices (AVDs)
+emulator-list:
+    & "{{ sdk_dir }}/emulator/emulator.exe" -list-avds
+
+# Start the Android emulator in the background (default: medium_phone)
+emulator-start AVD="medium_phone":
+    Start-Process -FilePath "{{ sdk_dir }}/emulator/emulator.exe" -ArgumentList "-avd", "{{ AVD }}"
+
+# Wait for the Android emulator to fully finish booting
+emulator-wait:
+    Write-Host "Waiting for Android emulator to finish booting..." -ForegroundColor Cyan; & "{{ sdk_dir }}/platform-tools/adb.exe" wait-for-device; while ((& "{{ sdk_dir }}/platform-tools/adb.exe" shell getprop sys.boot_completed).Trim() -ne "1") { Start-Sleep -Seconds 2 }; Write-Host "Android emulator is ready." -ForegroundColor Green
+
+# Stop the running Android emulator
+emulator-stop:
+    & "{{ sdk_dir }}/platform-tools/adb.exe" emu kill
+
+# Launch emulator, wait for boot, package x86_64 APK, install, and benchmark cold start time
+android-run-emulator AVD="medium_phone" PROFILE="release":
+    if (-not (& "{{ sdk_dir }}/platform-tools/adb.exe" devices | Select-String "emulator")) { Write-Host "Starting emulator {{ AVD }}..." -ForegroundColor Cyan; Start-Process -FilePath "{{ sdk_dir }}/emulator/emulator.exe" -ArgumentList "-avd", "{{ AVD }}" }
+    just emulator-wait
+    just android-run TARGET="x86_64" PROFILE="{{ PROFILE }}"

@@ -1,0 +1,251 @@
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme, GroceryItemData } from "theme.slint";
+
+export component DetailScreen inherits Rectangle {
+    in property <bool> dark_mode: true;
+    in property <string> list_title: "Groceries";
+    in property <[GroceryItemData]> items: [];
+    in property <bool> show_undo_toast: false;
+    in property <string> undo_toast_message: "";
+    in-out property <string> new_item_input: "";
+    in-out property <string> suggested_category: "General";
+
+    callback toggle_item_check(string /* id */);
+    callback delete_item(string /* id */);
+    callback add_item(string /* raw_input */);
+    callback trigger_undo();
+    callback start_in_store_mode();
+
+    background: dark_mode ? Theme.dark_bg : Theme.light_bg;
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // In-store mode banner / action
+        Rectangle {
+            height: 48px;
+            background: Theme.primary;
+
+            TouchArea {
+                accessible_role: button;
+                accessible_label: "Enter in-store shopping mode";
+                clicked => { root.start_in_store_mode(); }
+            }
+
+            HorizontalLayout {
+                padding_left: 16px;
+                padding_right: 16px;
+                alignment: center;
+                spacing: 8px;
+
+                Text {
+                    text: "🛒 Enter In-Store Shopping Mode";
+                    font_size: 15px;
+                    font_weight: 700;
+                    color: #ffffff;
+                    vertical_alignment: center;
+                }
+            }
+        }
+
+        // Scrollable item list
+        ScrollView {
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                if root.items.length == 0 : Rectangle {
+                    height: 200px;
+                    border_radius: 12px;
+                    background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 8px;
+
+                        Text {
+                            text: "📝 List is empty";
+                            font_size: 18px;
+                            font_weight: 600;
+                            color: dark_mode ? Theme.dark_text : Theme.light_text;
+                            horizontal_alignment: center;
+                        }
+
+                        Text {
+                            text: "Type below to quickly add items (e.g. '2 lbs apples', 'milk 1 gal').";
+                            font_size: 13px;
+                            color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                            horizontal_alignment: center;
+                        }
+                    }
+                }
+
+                for item in root.items : Rectangle {
+                    height: 64px;
+                    border_radius: 12px;
+                    background: item.checked ? (dark_mode ? #1c1c1c : #f1f3f4) : (dark_mode ? Theme.dark_surface_card : Theme.light_surface);
+
+                    HorizontalLayout {
+                        padding_left: 12px;
+                        padding_right: 12px;
+                        spacing: 12px;
+                        alignment: space_between;
+
+                        // Checkbox
+                        Rectangle {
+                            width: Theme.min_touch_target;
+                            height: Theme.min_touch_target;
+
+                            TouchArea {
+                                accessible_role: checkbox;
+                                accessible_label: item.name;
+                                accessible_checked: item.checked;
+                                clicked => { root.toggle_item_check(item.id); }
+                            }
+
+                            Text {
+                                text: item.checked ? "☑" : "☐";
+                                font_size: 24px;
+                                color: item.checked ? Theme.primary_light : (dark_mode ? #888888 : #666666);
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                        }
+
+                        // Name, qty/unit, and category
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 3px;
+
+                            Text {
+                                text: item.name;
+                                font_size: 16px;
+                                font_weight: item.checked ? 400 : 600;
+                                color: item.checked ? #777777 : (dark_mode ? Theme.dark_text : Theme.light_text);
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                Text {
+                                    text: item.quantity != "" ? (item.quantity + (item.unit != "" ? " " + item.unit : "")) : "";
+                                    font_size: 13px;
+                                    color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                                }
+
+                                if item.category != "" : Rectangle {
+                                    background: dark_mode ? #333333 : #e0e0e0;
+                                    border_radius: 4px;
+
+                                    HorizontalLayout {
+                                        padding_left: 6px;
+                                        padding_right: 6px;
+
+                                        Text {
+                                            text: item.category;
+                                            font_size: 11px;
+                                            color: dark_mode ? #bbbbbb : #555555;
+                                            vertical_alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Delete button
+                        Rectangle {
+                            width: Theme.min_touch_target;
+                            height: Theme.min_touch_target;
+
+                            TouchArea {
+                                accessible_role: button;
+                                accessible_label: "Delete " + item.name;
+                                clicked => { root.delete_item(item.id); }
+                            }
+
+                            Text {
+                                text: "✕";
+                                font_size: 15px;
+                                color: Theme.error;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Undo Toast
+        if root.show_undo_toast : Rectangle {
+            height: 48px;
+            background: #2c2c2c;
+
+            HorizontalLayout {
+                padding_left: 16px;
+                padding_right: 16px;
+                alignment: space_between;
+
+                Text {
+                    text: root.undo_toast_message;
+                    color: #ffffff;
+                    vertical_alignment: center;
+                    font_size: 14px;
+                }
+
+                Rectangle {
+                    width: 70px;
+                    height: 36px;
+                    TouchArea {
+                        accessible_role: button;
+                        accessible_label: "Undo item deletion";
+                        clicked => { root.trigger_undo(); }
+                    }
+                    Text {
+                        text: "UNDO";
+                        color: Theme.primary_light;
+                        font_weight: 700;
+                        vertical_alignment: center;
+                        horizontal_alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Sticky Quick-Add Bar
+        Rectangle {
+            height: 76px;
+            background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 8px;
+                alignment: center;
+
+                input := LineEdit {
+                    text: root.new_item_input;
+                    placeholder_text: "Add item (e.g. 2 lbs apples, milk 1 gal)...";
+                    edited(val) => { root.new_item_input = val; }
+                    accepted => {
+                        if (root.new_item_input != "") {
+                            root.add_item(root.new_item_input);
+                            root.new_item_input = "";
+                        }
+                    }
+                }
+
+                Button {
+                    text: "+ Add";
+                    primary: true;
+                    enabled: root.new_item_input != "";
+                    clicked => {
+                        root.add_item(root.new_item_input);
+                        root.new_item_input = "";
+                    }
+                }
+            }
+        }
+    }
+}

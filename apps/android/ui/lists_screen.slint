@@ -1,0 +1,194 @@
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme, GroceryListInfo } from "theme.slint";
+
+export component ListsScreen inherits Rectangle {
+    in property <bool> dark_mode: true;
+    in property <[GroceryListInfo]> lists: [];
+    in-out property <string> new_list_title: "";
+
+    callback select_list(string /* id */, string /* title */);
+    callback create_list(string /* title */);
+    callback share_list(string /* id */);
+    callback delete_list(string /* id */);
+    callback rotate_list(string /* id */);
+
+    background: dark_mode ? Theme.dark_bg : Theme.light_bg;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        // Quick Create Bar
+        Rectangle {
+            height: 60px;
+            border-radius: 12px;
+            background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                alignment: center;
+
+                input := LineEdit {
+                    text: root.new_list_title;
+                    placeholder_text: "New list name (e.g. Costco, Trader Joe's)...";
+                    edited(val) => { root.new_list_title = val; }
+                    accepted => {
+                        if (root.new_list_title != "") {
+                            root.create_list(root.new_list_title);
+                            root.new_list_title = "";
+                        }
+                    }
+                }
+
+                Button {
+                    text: "+ Create";
+                    primary: true;
+                    enabled: root.new_list_title != "";
+                    clicked => {
+                        root.create_list(root.new_list_title);
+                        root.new_list_title = "";
+                    }
+                }
+            }
+        }
+
+        // Empty state
+        if root.lists.length == 0 : Rectangle {
+            height: 280px;
+            border-radius: 16px;
+            background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 12px;
+                padding: 24px;
+
+                Text {
+                    text: "🛒";
+                    font_size: 48px;
+                    horizontal_alignment: center;
+                }
+
+                Text {
+                    text: "No Grocery Lists Yet";
+                    font_size: 20px;
+                    font_weight: 700;
+                    color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    horizontal_alignment: center;
+                }
+
+                Text {
+                    text: "Create a list above or join a shared list using a ticket from a peer.";
+                    font_size: 14px;
+                    color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                    horizontal_alignment: center;
+                    wrap: word_wrap;
+                }
+            }
+        }
+
+        // Scrollable Lists
+        if root.lists.length > 0 : ScrollView {
+            VerticalLayout {
+                spacing: 10px;
+
+                for list in root.lists : Rectangle {
+                    height: 84px;
+                    border_radius: 14px;
+                    background: dark_mode ? Theme.dark_surface_card : Theme.light_surface;
+
+                    TouchArea {
+                        accessible_role: button;
+                        accessible_label: "Open list " + list.title;
+                        clicked => {
+                            root.select_list(list.id, list.title);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding_left: 16px;
+                        padding_right: 12px;
+                        alignment: space_between;
+
+                        // Title, counters and peer indicator
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                // Peer status dot
+                                Rectangle {
+                                    width: 10px;
+                                    height: 10px;
+                                    border_radius: 5px;
+                                    y: 5px;
+                                    background: list.is_online ? Theme.primary_light : (dark_mode ? #666666 : #bbbbbb);
+                                }
+
+                                Text {
+                                    text: list.title;
+                                    font_size: 18px;
+                                    font_weight: 700;
+                                    color: dark_mode ? Theme.dark_text : Theme.light_text;
+                                }
+                            }
+
+                            Text {
+                                text: (list.item_count - list.checked_count) + " to buy • " + list.checked_count + " done • " + list.peer_status;
+                                font_size: 13px;
+                                color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                            }
+                        }
+
+                        // Context buttons
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: center;
+
+                            // Share button
+                            Rectangle {
+                                width: 40px;
+                                height: 40px;
+                                border_radius: 20px;
+                                TouchArea {
+                                    accessible_role: button;
+                                    accessible_label: "Share list";
+                                    clicked => { root.share_list(list.id); }
+                                }
+                                Text {
+                                    text: "🔗";
+                                    font_size: 16px;
+                                    horizontal_alignment: center;
+                                    vertical_alignment: center;
+                                }
+                            }
+
+                            // Delete button
+                            Rectangle {
+                                width: 40px;
+                                height: 40px;
+                                border_radius: 20px;
+                                TouchArea {
+                                    accessible_role: button;
+                                    accessible_label: "Delete list";
+                                    clicked => { root.delete_list(list.id); }
+                                }
+                                Text {
+                                    text: "🗑️";
+                                    font_size: 14px;
+                                    horizontal_alignment: center;
+                                    vertical_alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

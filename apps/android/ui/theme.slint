@@ -1,0 +1,48 @@
+export struct GroceryItemData {
+    id: string,
+    name: string,
+    quantity: string,
+    unit: string,
+    category: string,
+    note: string,
+    checked: bool,
+    position: string,
+}
+
+export struct GroceryListInfo {
+    id: string,
+    title: string,
+    item_count: int,
+    checked_count: int,
+    peer_status: string,
+    is_online: bool,
+}
+
+export global Theme {
+    // Brand Colors
+    out property <color> primary: #2e7d32;         // Forest Green (Material 3)
+    out property <color> primary_light: #4caf50;   // Vibrant Green
+    out property <color> primary_variant: #1b5e20; // Deep Green
+    out property <color> secondary: #ff9800;       // Warm Amber
+    out property <color> error: #e53935;           // Coral Red
+
+    // Dark Mode Palette
+    out property <color> dark_bg: #121212;
+    out property <color> dark_surface: #1e1e1e;
+    out property <color> dark_surface_card: #252525;
+    out property <color> dark_border: #333333;
+    out property <color> dark_text: #f5f5f5;
+    out property <color> dark_text_secondary: #9e9e9e;
+
+    // Light Mode Palette
+    out property <color> light_bg: #f8f9fa;
+    out property <color> light_surface: #ffffff;
+    out property <color> light_surface_card: #f1f3f4;
+    out property <color> light_border: #e0e0e0;
+    out property <color> light_text: #1a1a1a;
+    out property <color> light_text_secondary: #616161;
+
+    // Touch Target Standards (Accessibility)
+    out property <length> min_touch_target: 48px;
+    out property <length> in_store_touch_target: 56px;
+}

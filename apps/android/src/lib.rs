@@ -5,114 +5,75 @@ pub mod sync_bridge;
 
 slint::include_modules!();
 
-use slint::{Model, VecModel};
-use std::rc::Rc;
-
 /// Wire up UI handlers and sync dispatch for AppWindow.
-pub fn setup_app_window(
-    app: &AppWindow,
-    sync_handle: sync_bridge::SyncBridgeHandle,
-    items_model: Rc<VecModel<GroceryItemData>>,
-) {
-    app.set_items(slint::ModelRc::from(items_model.clone()));
-
-    let last_deleted: Rc<std::cell::RefCell<Option<(usize, GroceryItemData)>>> =
-        Rc::new(std::cell::RefCell::new(None));
-
-    let app_weak = app.as_weak();
-    app.on_toggle_in_store_mode(move || {
-        if let Some(app) = app_weak.upgrade() {
-            let current = app.get_in_store_mode();
-            app.set_in_store_mode(!current);
-            tracing::info!("In-store mode toggled: {}", !current);
-        }
+pub fn setup_app_window(app: &AppWindow, sync_handle: sync_bridge::SyncBridgeHandle) {
+    let sh = sync_handle.clone();
+    app.on_select_list(move |id, _title| {
+        sh.send(sync_bridge::SyncCommand::SelectList { id: id.to_string() });
     });
 
-    let items_model_clone = items_model.clone();
-    let sync_handle_clone = sync_handle.clone();
-    app.on_toggle_item_check(move |id| {
-        for i in 0..items_model_clone.row_count() {
-            if let Some(mut item) = items_model_clone.row_data(i) {
-                if item.id == id {
-                    item.checked = !item.checked;
-                    let checked = item.checked;
-                    items_model_clone.set_row_data(i, item);
-                    sync_handle_clone.send(sync_bridge::SyncCommand::ToggleItemCheck {
-                        id: id.to_string(),
-                        checked,
-                    });
-                    break;
-                }
-            }
-        }
-    });
-
-    let items_model_clone = items_model.clone();
-    let sync_handle_clone = sync_handle.clone();
-    app.on_add_item(move |name, qty| {
-        let id = uuid::Uuid::now_v7().to_string();
-        let new_item = GroceryItemData {
-            id: id.clone().into(),
-            name: name.clone(),
-            quantity: format!("{}", qty).into(),
-            category: "General".into(),
-            checked: false,
-        };
-        items_model_clone.push(new_item);
-        sync_handle_clone.send(sync_bridge::SyncCommand::AddItem {
-            id,
-            name: name.to_string(),
-            quantity: format!("{}", qty),
-            category: "General".to_string(),
+    let sh = sync_handle.clone();
+    app.on_create_list(move |title| {
+        sh.send(sync_bridge::SyncCommand::CreateList {
+            title: title.to_string(),
         });
     });
 
-    let items_model_clone = items_model.clone();
-    let last_deleted_clone = last_deleted.clone();
-    let sync_handle_clone = sync_handle.clone();
-    let app_weak = app.as_weak();
-    app.on_delete_item(move |id| {
-        for i in 0..items_model_clone.row_count() {
-            if let Some(item) = items_model_clone.row_data(i) {
-                if item.id == id {
-                    let removed = items_model_clone.remove(i);
-                    *last_deleted_clone.borrow_mut() = Some((i, removed));
-                    if let Some(app) = app_weak.upgrade() {
-                        app.set_undo_toast_message("Item deleted".into());
-                        app.set_show_undo_toast(true);
-                    }
-                    sync_handle_clone
-                        .send(sync_bridge::SyncCommand::DeleteItem { id: id.to_string() });
-                    break;
-                }
-            }
-        }
+    let sh = sync_handle.clone();
+    app.on_delete_list(move |id| {
+        sh.send(sync_bridge::SyncCommand::DeleteList { id: id.to_string() });
     });
 
-    let items_model_clone = items_model.clone();
-    let last_deleted_clone = last_deleted.clone();
-    let sync_handle_clone = sync_handle.clone();
-    let app_weak = app.as_weak();
+    let sh = sync_handle.clone();
+    app.on_rotate_list(move |id| {
+        sh.send(sync_bridge::SyncCommand::RotateList { id: id.to_string() });
+    });
+
+    let sh = sync_handle.clone();
+    app.on_share_list(move |id| {
+        sh.send(sync_bridge::SyncCommand::SelectList { id: id.to_string() });
+    });
+
+    let sh = sync_handle.clone();
+    app.on_toggle_item_check(move |id| {
+        android_runtime::trigger_haptic_feedback();
+        sh.send(sync_bridge::SyncCommand::ToggleItemCheck { id: id.to_string() });
+    });
+
+    let sh = sync_handle.clone();
+    app.on_delete_item(move |id| {
+        sh.send(sync_bridge::SyncCommand::DeleteItem { id: id.to_string() });
+    });
+
+    let sh = sync_handle.clone();
+    app.on_add_item(move |raw_input| {
+        sh.send(sync_bridge::SyncCommand::AddItem {
+            raw_input: raw_input.to_string(),
+        });
+    });
+
+    let sh = sync_handle.clone();
     app.on_trigger_undo(move || {
-        if let Some((idx, item)) = last_deleted_clone.borrow_mut().take() {
-            let id = item.id.to_string();
-            let name = item.name.to_string();
-            let quantity = item.quantity.to_string();
-            let category = item.category.to_string();
-            if idx <= items_model_clone.row_count() {
-                items_model_clone.insert(idx, item);
-            } else {
-                items_model_clone.push(item);
-            }
-            if let Some(app) = app_weak.upgrade() {
-                app.set_show_undo_toast(false);
-            }
-            sync_handle_clone.send(sync_bridge::SyncCommand::AddItem {
-                id,
-                name,
-                quantity,
-                category,
-            });
+        sh.send(sync_bridge::SyncCommand::UndoDelete);
+    });
+
+    let sh = sync_handle.clone();
+    app.on_join_ticket(move |ticket| {
+        sh.send(sync_bridge::SyncCommand::JoinTicket {
+            ticket_str: ticket.to_string(),
+        });
+    });
+
+    let sh = sync_handle.clone();
+    app.on_prune_tombstones(move || {
+        sh.send(sync_bridge::SyncCommand::PruneTombstones);
+    });
+
+    let app_weak = app.as_weak();
+    app.on_copy_ticket(move || {
+        if let Some(app) = app_weak.upgrade() {
+            let t = app.get_ticket_str().to_string();
+            tracing::info!("Share ticket copied to clipboard: {}", t);
         }
     });
 }
@@ -123,9 +84,9 @@ pub fn setup_app_window(
 pub extern "C" fn android_main(app: slint::android::AndroidApp) {
     tracing::info!("Initializing Groshe on Android...");
 
-    // Acquire MulticastLock via JNI for mDNS peer discovery
-    if let Err(e) = android_runtime::acquire_multicast_lock(&app) {
-        tracing::warn!("Could not acquire MulticastLock via JNI: {}", e);
+    // Acquire MulticastLock via JNI for mDNS peer discovery and register JVM/Activity
+    if let Err(e) = android_runtime::init_android_environment(&app) {
+        tracing::warn!("Could not initialize Android environment: {}", e);
     }
 
     // Resolve internal files directory for persistent Iroh storage
@@ -138,9 +99,8 @@ pub extern "C" fn android_main(app: slint::android::AndroidApp) {
 
     slint::android::init(app).expect("Failed to initialize Slint Android backend");
     let main_window = AppWindow::new().expect("Failed to create main window");
-    let items_model = Rc::new(VecModel::default());
     let sync_handle = sync_bridge::spawn_sync_bridge(&runtime, storage_dir, main_window.as_weak());
-    setup_app_window(&main_window, sync_handle, items_model);
+    setup_app_window(&main_window, sync_handle);
     main_window
         .run()
         .expect("Slint event loop terminated with error");
@@ -151,9 +111,8 @@ pub fn run_desktop() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = android_runtime::init_tokio_runtime()?;
     let storage_dir = android_runtime::resolve_desktop_storage_dir();
     let main_window = AppWindow::new()?;
-    let items_model = Rc::new(VecModel::default());
     let sync_handle = sync_bridge::spawn_sync_bridge(&runtime, storage_dir, main_window.as_weak());
-    setup_app_window(&main_window, sync_handle, items_model);
+    setup_app_window(&main_window, sync_handle);
     main_window.run()?;
     Ok(())
 }
