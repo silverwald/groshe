@@ -1,4 +1,4 @@
-import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+﻿import { Button, LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme, GroceryItemData } from "theme.slint";
 
 export component DetailScreen inherits Rectangle {
@@ -114,7 +114,7 @@ export component DetailScreen inherits Rectangle {
                             }
                         }
 
-                        // Name, qty/unit, and category
+                        // Name, qty/unit, category, and photo badge
                         VerticalLayout {
                             alignment: center;
                             spacing: 3px;
@@ -148,6 +148,23 @@ export component DetailScreen inherits Rectangle {
                                             text: item.category;
                                             font_size: 11px;
                                             color: dark_mode ? #bbbbbb : #555555;
+                                            vertical_alignment: center;
+                                        }
+                                    }
+                                }
+
+                                if item.has_photo : Rectangle {
+                                    background: dark_mode ? #1e3a5f : #e3f2fd;
+                                    border_radius: 4px;
+
+                                    HorizontalLayout {
+                                        padding_left: 6px;
+                                        padding_right: 6px;
+
+                                        Text {
+                                            text: "📷 photo";
+                                            font_size: 11px;
+                                            color: dark_mode ? #90caf9 : #1976d2;
                                             vertical_alignment: center;
                                         }
                                     }

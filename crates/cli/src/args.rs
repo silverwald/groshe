@@ -51,6 +51,9 @@ pub enum Commands {
         /// Optional user note
         #[arg(short, long)]
         note: Option<String>,
+        /// Optional path to item thumbnail photo (<256KB)
+        #[arg(short, long)]
+        photo: Option<PathBuf>,
         /// Target list ID or prefix (defaults to only list if single)
         #[arg(short, long)]
         list: Option<String>,
@@ -163,6 +166,18 @@ pub enum Commands {
 
     /// Show network peers, listening addresses, and presence
     Peers {
+        /// Target list ID or prefix
+        #[arg(short, long)]
+        list: Option<String>,
+    },
+
+    /// Export or inspect an attached item photo blob
+    Photo {
+        /// Item ID or unique UUID prefix
+        item: String,
+        /// Output destination path for the photo blob
+        #[arg(short, long)]
+        output: PathBuf,
         /// Target list ID or prefix
         #[arg(short, long)]
         list: Option<String>,

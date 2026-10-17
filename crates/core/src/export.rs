@@ -1,4 +1,4 @@
-//! Backup, export, and import formatting for Groshe lists per DESIGN.md §8 & §15.
+﻿//! Backup, export, and import formatting for Groshe lists per DESIGN.md §8 & §15.
 //!
 //! Provides full-fidelity JSON serialization for complete backups/restores, and
 //! human-readable GitHub Flavored Markdown (GFM) checklist export and parsing.
@@ -21,6 +21,8 @@ pub struct ExportItem {
     pub note: Option<String>,
     pub checked: bool,
     pub position: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_hash: Option<String>,
 }
 
 /// DTO representing a complete grocery list backup snapshot.
@@ -196,6 +198,7 @@ impl ExportList {
                 note,
                 checked: is_checked,
                 position: next_pos.to_string(),
+                photo_hash: None,
             });
         }
 
@@ -234,7 +237,10 @@ fn extract_note(text: &str) -> (String, Option<String>) {
     let stripped = trimmed.trim_end_matches(['*', '_', ' ']);
     if let Some(idx) = stripped.rfind('(') {
         if stripped.ends_with(')') {
-            let core = trimmed[..idx].trim().trim_end_matches(['*', '_', ' ']).trim();
+            let core = trimmed[..idx]
+                .trim()
+                .trim_end_matches(['*', '_', ' '])
+                .trim();
             let raw_note = &stripped[idx + 1..stripped.len() - 1];
             let note = raw_note.trim().trim_matches(['*', '_', ' ']).trim();
             if !note.is_empty() && !core.is_empty() {
@@ -243,6 +249,26 @@ fn extract_note(text: &str) -> (String, Option<String>) {
         }
     }
     (trimmed.to_string(), None)
+}
+
+/// Parses a 64-character hexadecimal string into a 32-byte hash array.
+pub fn parse_hex_32(s: &str) -> Option<[u8; 32]> {
+    let trimmed = s.trim();
+    if trimmed.len() != 64 {
+        return None;
+    }
+    let mut bytes = [0u8; 32];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        let hi = (trimmed.as_bytes()[i * 2] as char).to_digit(16)? as u8;
+        let lo = (trimmed.as_bytes()[i * 2 + 1] as char).to_digit(16)? as u8;
+        *byte = (hi << 4) | lo;
+    }
+    Some(bytes)
+}
+
+/// Formats a 32-byte array as a lowercase 64-character hex string.
+pub fn hex_32(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 #[cfg(test)]
@@ -260,6 +286,7 @@ mod tests {
             note: Some("Honeycrisp".to_string()),
             checked: false,
             position: "a0".to_string(),
+            photo_hash: None,
         };
 
         let item2 = ExportItem {
@@ -271,6 +298,7 @@ mod tests {
             note: None,
             checked: true,
             position: "a1".to_string(),
+            photo_hash: Some("abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890".to_string()),
         };
 
         let list = ExportList::new("Weekly Groceries", "alice", 1234567, vec![item1, item2]);
@@ -278,6 +306,23 @@ mod tests {
 
         let decoded = ExportList::from_json(&json).unwrap();
         assert_eq!(list, decoded);
+    }
+
+    #[test]
+    fn test_hex_32_helpers() {
+        let bytes: [u8; 32] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+            0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10,
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+            0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+        ];
+        let hex_str = hex_32(&bytes);
+        assert_eq!(hex_str.len(), 64);
+        let parsed = parse_hex_32(&hex_str).unwrap();
+        assert_eq!(parsed, bytes);
+
+        assert_eq!(parse_hex_32("invalid"), None);
+        assert_eq!(parse_hex_32("0123"), None);
     }
 
     #[test]
@@ -291,6 +336,7 @@ mod tests {
             note: None,
             checked: false,
             position: "a0".to_string(),
+            photo_hash: None,
         };
 
         let item2 = ExportItem {
@@ -302,6 +348,7 @@ mod tests {
             note: Some("Organic".to_string()),
             checked: true,
             position: "a1".to_string(),
+            photo_hash: None,
         };
 
         let list = ExportList::new("Supermarket Trip", "alice", 1000, vec![item1, item2]);

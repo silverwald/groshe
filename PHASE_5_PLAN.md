@@ -1,6 +1,6 @@
 # Phase 5 Detailed Execution Plan: Hardening & Extras
 
-**Status:** In Progress (Milestone 5.1 & 5.2 Complete)  
+**Status:** In Progress (Milestones 5.1, 5.2 & 5.3 Complete)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) §10 (Mobile UI), §15 (Phase 5)  
 **Target Branch:** `feature/phase-5-hardening-extras`  
 
@@ -50,13 +50,24 @@ Phase 2 delivered the complete Android MVP (Slint multi-screen UI, reactive sync
   - Added "Export Active List (Markdown)" and "Full Backup (JSON)" actions in `settings_screen.slint`.
   - Wired callbacks in `sync_bridge.rs` and `lib.rs` saving exports into `storage_dir/exports/`.
 
-### Milestone 5.3: Item Photos via Iroh-Blobs
+### Milestone 5.3: Item Photos via Iroh-Blobs (COMPLETE)
 **Goal:** Attach reference photos (e.g. specific packaging/brand) synced over Iroh content-addressed blobs.
-- [ ] **5.3.1 Photo Blob Schema**:
-  - Add `photo_hash: Option<[u8; 32]>` (Blake3 hash) to `ItemData`.
-- [ ] **5.3.2 Blob Sync Engine**:
-  - Integrate `iroh-blobs` in `crates/sync` for storing and fetching image blobs.
-  - Enforce size limits (max 256KB thumbnail) to preserve mobile data and battery.
+- [x] **5.3.1 Photo Blob Schema (`crates/core/src/model.rs`, `export.rs`)**:
+  - Added `photo_hash: Option<[u8; 32]>` (Blake3 hash) to `ItemData` with builder method `with_photo_hash`.
+  - Added `photo_hash: Option<String>` to `ExportItem` for JSON export/import portability with `parse_hex_32` and `hex_32` helpers.
+- [x] **5.3.2 Blob Sync Engine (`crates/sync/src/lib.rs`)**:
+  - Integrated `iroh_blobs::api::Store` into `GrosheSyncNode`.
+  - Implemented `add_photo_blob(&self, data: &[u8]) -> Result<[u8; 32], SyncError>` enforcing the 256KB thumbnail cap.
+  - Implemented `get_photo_blob(&self, hash_bytes: &[u8; 32]) -> Result<Vec<u8>, SyncError>` retrieving raw bytes by Blake3 hash.
+  - Added unit test `test_photo_blob_storage_and_cap` verifying blob storage, byte-for-byte retrieval, and 256KB cap rejection.
+- [x] **5.3.3 CLI Photo Commands & Options (`crates/cli`)**:
+  - Added `--photo <path>` option to `grocery add` to attach photos during item creation.
+  - Added `grocery photo <item> --output <path> [--list <id>]` to inspect and extract item photos.
+  - Display photo indicators in `grocery ls` and JSON item DTOs.
+- [x] **5.3.4 Slint UI Photo Indicators (`apps/android`)**:
+  - Added `has_photo: bool` field to `GroceryItemData`.
+  - Visual photo badges rendered in both `detail_screen.slint` (`📷 photo`) and `in_store_screen.slint` (`📷`).
+  - Populated `has_photo: item.data.photo_hash.is_some()` in `sync_bridge.rs`.
 
 ### Milestone 5.4: Self-Hosted Relay & Hardening
 **Goal:** Sovereign infrastructure deployment and connection resilience.

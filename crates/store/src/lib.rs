@@ -1,4 +1,4 @@
-//! Materialized projection and query store for Groshe.
+﻿//! Materialized projection and query store for Groshe.
 //!
 //! Frontends (Slint mobile UI, CLI, and Web) read from this in-memory materialized
 //! projection rather than querying the P2P sync layer directly on render passes.
@@ -237,13 +237,7 @@ impl ListProjection {
                         // Track tombstone timestamp so older inserts arriving out-of-order are rejected
                         let mut placeholder = ItemView::new(
                             item_id,
-                            ItemData::new("Deleted item").unwrap_or_else(|_| ItemData {
-                                name: "Deleted".to_string(),
-                                quantity: None,
-                                unit: None,
-                                category: None,
-                                note: None,
-                            }),
+                            ItemData::new("Deleted item").expect("valid item name"),
                             timestamp,
                         );
                         placeholder.has_data = false;
@@ -295,13 +289,7 @@ impl ListProjection {
                     // Create placeholder if check arrived before data
                     let mut placeholder = ItemView::new(
                         item_id,
-                        ItemData::new("Pending item").unwrap_or_else(|_| ItemData {
-                            name: "Item".to_string(),
-                            quantity: None,
-                            unit: None,
-                            category: None,
-                            note: None,
-                        }),
+                        ItemData::new("Pending item").expect("valid item name"),
                         0,
                     );
                     placeholder.has_data = false;
@@ -336,13 +324,7 @@ impl ListProjection {
                     // Create placeholder if position arrived before data
                     let mut placeholder = ItemView::new(
                         item_id,
-                        ItemData::new("Pending item").unwrap_or_else(|_| ItemData {
-                            name: "Item".to_string(),
-                            quantity: None,
-                            unit: None,
-                            category: None,
-                            note: None,
-                        }),
+                        ItemData::new("Pending item").expect("valid item name"),
                         0,
                     );
                     placeholder.has_data = false;

@@ -1,4 +1,4 @@
-mod args;
+﻿mod args;
 
 use clap::Parser;
 use groshe_core::{to_cbor, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId};
@@ -296,6 +296,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             unit,
             category,
             note,
+            photo,
             list,
         } => {
             let node = GrosheSyncNode::persistent(&data_dir).await?;
@@ -322,6 +323,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             if let Some(n) = note {
                 item_data = item_data.with_note(n);
+            }
+            if let Some(photo_path) = photo {
+                let photo_bytes = tokio::fs::read(&photo_path).await?;
+                let hash = node.add_photo_blob(&photo_bytes).await?;
+                item_data = item_data.with_photo_hash(hash);
             }
 
             let check = ItemCheck::unchecked();
@@ -367,11 +373,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "status": "added",
                         "id": item_id.to_string(),
                         "name": name,
-                        "position": next_pos.as_str()
+                        "position": next_pos.as_str(),
+                        "has_photo": item_data.photo_hash.is_some()
                     })
                 );
             } else {
-                println!("Added '{}' (ID: {})", name, &item_id.to_string()[..8]);
+                let photo_msg = if item_data.photo_hash.is_some() { " [photo attached]" } else { "" };
+                println!("Added '{}' (ID: {}){}", name, &item_id.to_string()[..8], photo_msg);
             }
             node.shutdown().await?;
         }
@@ -624,6 +632,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         note: i.data.note.clone(),
                         checked: i.is_checked(),
                         position: i.position.to_string(),
+                        photo_hash: i
+                            .data
+                            .photo_hash
+                            .map(|h| h.iter().map(|b| format!("{:02x}", b)).collect()),
                     })
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&items)?);
@@ -645,11 +657,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             for item in filtered {
                                 let check_str = if item.is_checked() { "[x]" } else { "[ ]" };
                                 let qty_str = format_qty(&item.data);
+                                let photo_str = if item.data.photo_hash.is_some() {
+                                    " [photo]"
+                                } else {
+                                    ""
+                                };
                                 println!(
-                                    "  {} {:<28} {:<12} (id: {})",
+                                    "  {} {:<28} {:<12}{} (id: {})",
                                     check_str,
                                     format!("{}{}", item.name(), qty_str),
                                     item.data.note.as_deref().unwrap_or(""),
+                                    photo_str,
                                     &item.id.to_string()[..8]
                                 );
                             }
@@ -663,11 +681,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     {
                         let check_str = if item.is_checked() { "[x]" } else { "[ ]" };
                         let qty_str = format_qty(&item.data);
+                        let photo_str = if item.data.photo_hash.is_some() {
+                            " [photo]"
+                        } else {
+                            ""
+                        };
                         println!(
-                            "  {} {:<28} {:<12} (id: {})",
+                            "  {} {:<28} {:<12}{} (id: {})",
                             check_str,
                             format!("{}{}", item.name(), qty_str),
                             item.data.note.as_deref().unwrap_or(""),
+                            photo_str,
                             &item.id.to_string()[..8]
                         );
                     }
@@ -801,6 +825,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             node.shutdown().await?;
         }
 
+        Commands::Photo { item, output, list } => {
+            let node = GrosheSyncNode::persistent(&data_dir).await?;
+            let (ns_id, doc) = resolve_target_doc(&node, list).await?;
+            let list_id = ListId(uuid::Uuid::from_bytes(
+                ns_id.as_bytes()[..16].try_into().unwrap(),
+            ));
+            let proj = load_projection(&node, &doc, list_id).await?;
+            let item_id = resolve_item_id_in_proj(&proj, &item)?;
+            let item_view = proj.get_item(&item_id).unwrap();
+
+            match item_view.data.photo_hash {
+                Some(hash) => {
+                    let bytes = node.get_photo_blob(&hash).await?;
+                    tokio::fs::write(&output, &bytes).await?;
+                    let hex_hash: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "status": "exported",
+                                "item_id": item_view.id.to_string(),
+                                "photo_hash": hex_hash,
+                                "output": output.display().to_string(),
+                                "bytes": bytes.len()
+                            })
+                        );
+                    } else {
+                        println!(
+                            "Exported photo for '{}' ({} bytes, hash: {}) to {}",
+                            item_view.name(),
+                            bytes.len(),
+                            &hex_hash[..8],
+                            output.display()
+                        );
+                    }
+                }
+                None => {
+                    return Err(
+                        format!("Item '{}' has no attached photo blob", item_view.name()).into(),
+                    );
+                }
+            }
+            node.shutdown().await?;
+        }
+
         Commands::Export {
             format,
             output,
@@ -834,6 +903,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         note: i.data.note.clone(),
                         checked: i.is_checked(),
                         position: i.position.to_string(),
+                        photo_hash: i
+                            .data
+                            .photo_hash
+                            .map(|h| h.iter().map(|b| format!("{:02x}", b)).collect()),
                     })
                     .collect(),
             );
@@ -895,6 +968,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if let Some(n) = item.note {
                     data = data.with_note(n);
+                }
+                if let Some(ref ph_str) = item.photo_hash {
+                    if ph_str.len() == 64 {
+                        let mut bytes = [0u8; 32];
+                        let mut valid = true;
+                        for (idx, byte) in bytes.iter_mut().enumerate() {
+                            if let Ok(b) = u8::from_str_radix(&ph_str[idx * 2..idx * 2 + 2], 16) {
+                                *byte = b;
+                            } else {
+                                valid = false;
+                                break;
+                            }
+                        }
+                        if valid {
+                            data = data.with_photo_hash(bytes);
+                        }
+                    }
                 }
                 let check = if item.checked {
                     ItemCheck::checked(0, "import")

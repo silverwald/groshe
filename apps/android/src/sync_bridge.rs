@@ -86,6 +86,7 @@ fn projection_to_slint_items(proj: &ListProjection) -> Vec<GroceryItemData> {
             note: item.data.note.clone().unwrap_or_default().into(),
             checked: item.is_checked(),
             position: item.position.to_string().into(),
+            has_photo: item.data.photo_hash.is_some(),
         })
         .collect()
 }
@@ -506,6 +507,7 @@ pub fn spawn_sync_bridge(
                                         note: i.data.note.clone(),
                                         checked: i.is_checked(),
                                         position: i.position.to_string(),
+                                        photo_hash: i.data.photo_hash_hex(),
                                     })
                                     .collect(),
                             );
@@ -545,6 +547,7 @@ pub fn spawn_sync_bridge(
                                         note: i.data.note.clone(),
                                         checked: i.is_checked(),
                                         position: i.position.to_string(),
+                                        photo_hash: i.data.photo_hash_hex(),
                                     })
                                     .collect(),
                             );
