@@ -21,6 +21,7 @@ iroh-docs = { version = "0.101", features = ["fs-store"] }
 futures-util = "0.3"
 tokio-stream = "0.1"
 qrcode = { workspace = true }
+toml = { workspace = true }
 
 [dev-dependencies]
 groshe-store = { workspace = true }

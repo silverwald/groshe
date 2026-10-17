@@ -1,4 +1,4 @@
-//! Reactive sync bridge connecting Slint UI with GrosheSyncNode and ReactiveStore.
+﻿//! Reactive sync bridge connecting Slint UI with GrosheSyncNode and ReactiveStore.
 //!
 //! Handles background Iroh P2P synchronization, CRDT document mutations,
 //! multi-list management, live event streaming, and Slint view updates.
@@ -144,10 +144,17 @@ pub fn spawn_sync_bridge(
         // Push identity info to Slint settings
         let aid_clone = author_id.clone();
         let nid_clone = node_id.clone();
+        let relay_status = if let Some(relay) = node.config().custom_relay_url() {
+            format!("Custom: {relay}")
+        } else if node.config().is_relay_disabled() {
+            "Disabled (LAN only)".to_string()
+        } else {
+            "Connected (Default)".to_string()
+        };
         let _ = app_weak.upgrade_in_event_loop(move |app| {
             app.set_author_id(aid_clone.into());
             app.set_node_id(nid_clone.into());
-            app.set_relay_status("Connected".into());
+            app.set_relay_status(relay_status.into());
         });
 
         // Load existing document or create default list

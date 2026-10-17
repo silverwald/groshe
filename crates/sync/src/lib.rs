@@ -3,6 +3,7 @@
 //! Manages Iroh Endpoint, iroh-docs replicas, DocTicket parsing/creation,
 //! list rotation, and network presence.
 
+pub mod config;
 pub mod identity;
 pub mod presence;
 pub mod qr;
@@ -16,13 +17,14 @@ use groshe_core::{from_cbor, to_cbor, DocKey, ListId, ListMeta};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use config::GrosheConfig;
 pub use identity::DeviceIdentity;
 pub use presence::{derive_presence_topic, PresencePayload};
 pub use qr::render_qr_terminal;
 
 pub use iroh::endpoint::presets;
 pub use iroh::protocol::Router;
-pub use iroh::Endpoint;
+pub use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl};
 pub use iroh_blobs::api::Store as BlobsStore;
 pub use iroh_blobs::store::fs::FsStore;
 pub use iroh_blobs::store::mem::MemStore;
@@ -79,6 +81,7 @@ pub struct GrosheSyncNode {
     gossip: Gossip,
     router: Arc<Router>,
     author_id: AuthorId,
+    config: GrosheConfig,
 }
 
 impl GrosheSyncNode {
@@ -120,6 +123,7 @@ impl GrosheSyncNode {
             gossip,
             router: Arc::new(router),
             author_id,
+            config: GrosheConfig::default(),
         })
     }
 
@@ -128,11 +132,33 @@ impl GrosheSyncNode {
         let dir = data_dir.as_ref();
         tokio::fs::create_dir_all(dir).await?;
 
+        // Load or create configuration (groshe.toml)
+        let config = GrosheConfig::load_or_create(dir).await?;
+
         // Load or create persistent cryptographic identity
         let mut identity = DeviceIdentity::load_or_create(dir).await?;
 
+        let relay_mode = if config.is_relay_disabled() {
+            RelayMode::Disabled
+        } else if let Some(url_str) = config.custom_relay_url() {
+            match url_str.parse::<RelayUrl>() {
+                Ok(url) => RelayMode::Custom(RelayMap::from(url)),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to parse custom relay URL '{}': {}. Falling back to default relay.",
+                        url_str,
+                        e
+                    );
+                    RelayMode::Default
+                }
+            }
+        } else {
+            RelayMode::Default
+        };
+
         let endpoint = Endpoint::builder(presets::N0)
             .secret_key(identity.secret_key.clone())
+            .relay_mode(relay_mode)
             .bind()
             .await
             .map_err(|e| SyncError::Endpoint(e.to_string()))?;
@@ -185,7 +211,12 @@ impl GrosheSyncNode {
             gossip,
             router: Arc::new(router),
             author_id,
+            config,
         })
+    }
+
+    pub fn config(&self) -> &GrosheConfig {
+        &self.config
     }
 
     pub fn endpoint(&self) -> &Endpoint {
@@ -579,6 +610,39 @@ mod tests {
         // Verify list_ids contains the new namespace
         let ids = node.list_ids().await.unwrap();
         assert!(ids.contains(&id));
+    }
+
+    #[tokio::test]
+    async fn test_persistent_node_with_custom_relay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let toml_content = r#"
+[network]
+relay_url = "https://relay.sovereign.local"
+"#;
+        tokio::fs::write(tmp.path().join("groshe.toml"), toml_content).await.unwrap();
+
+        let node = GrosheSyncNode::persistent(tmp.path()).await.unwrap();
+        assert_eq!(
+            node.config().custom_relay_url(),
+            Some("https://relay.sovereign.local")
+        );
+        assert!(!node.config().is_relay_disabled());
+        node.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_persistent_node_with_disabled_relay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let toml_content = r#"
+[network]
+relay_url = "disabled"
+"#;
+        tokio::fs::write(tmp.path().join("groshe.toml"), toml_content).await.unwrap();
+
+        let node = GrosheSyncNode::persistent(tmp.path()).await.unwrap();
+        assert_eq!(node.config().custom_relay_url(), None);
+        assert!(node.config().is_relay_disabled());
+        node.shutdown().await.unwrap();
     }
 
     #[tokio::test]

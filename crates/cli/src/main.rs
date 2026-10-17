@@ -822,6 +822,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Author ID:     {}", node.author_id());
             println!("Target List:   {}", ns_id);
             println!("Listening on:  {:?}", addr.addrs);
+            if let Some(relay) = node.config().custom_relay_url() {
+                println!("Relay (Custom): {}", relay);
+            } else if node.config().is_relay_disabled() {
+                println!("Relay:         Disabled (Local LAN only)");
+            } else {
+                println!("Relay:         Default (Public n0 Production)");
+            }
             node.shutdown().await?;
         }
 

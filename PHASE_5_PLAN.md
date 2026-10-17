@@ -1,6 +1,6 @@
 # Phase 5 Detailed Execution Plan: Hardening & Extras
 
-**Status:** In Progress (Milestones 5.1, 5.2 & 5.3 Complete)  
+**Status:** Complete (Milestones 5.1, 5.2, 5.3 & 5.4 Complete)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) §10 (Mobile UI), §15 (Phase 5)  
 **Target Branch:** `feature/phase-5-hardening-extras`  
 
@@ -69,12 +69,18 @@ Phase 2 delivered the complete Android MVP (Slint multi-screen UI, reactive sync
   - Visual photo badges rendered in both `detail_screen.slint` (`📷 photo`) and `in_store_screen.slint` (`📷`).
   - Populated `has_photo: item.data.photo_hash.is_some()` in `sync_bridge.rs`.
 
-### Milestone 5.4: Self-Hosted Relay & Hardening
+### Milestone 5.4: Self-Hosted Relay & Hardening (COMPLETE)
 **Goal:** Sovereign infrastructure deployment and connection resilience.
-- [ ] **5.4.1 Relay Configuration in `groshe.toml`**:
-  - Allow specifying custom Iroh relay URLs in configuration.
-- [ ] **5.4.2 Documentation & Verification**:
-  - Add `docs/RELAY_SETUP.md` with instructions for running an independent `iroh-relay`.
+- [x] **5.4.1 Relay Configuration in `groshe.toml` (`crates/sync/src/config.rs`)**:
+  - Added `GrosheConfig` with `[network] relay_url = "..." | "disabled"` parsing.
+  - Auto-creates commented template `groshe.toml` if absent on first run.
+  - Wired into `GrosheSyncNode::persistent` mapping custom URLs to `RelayMode::Custom(RelayMap::from(url))` and `"disabled"` to `RelayMode::Disabled`.
+  - Added unit tests `test_config_load_and_create_default`, `test_custom_relay_url_parsing`, `test_disabled_relay_mode`, `test_persistent_node_with_custom_relay`, and `test_persistent_node_with_disabled_relay`.
+- [x] **5.4.2 CLI and UI Relay Status (`crates/cli`, `apps/android`)**:
+  - `grocery peers` shows whether relay is Default, Custom URL, or Disabled.
+  - Slint Settings screen reflects real-time relay status (`Connected (Default)`, `Custom: <url>`, or `Disabled (LAN only)`).
+- [x] **5.4.3 Self-Hosted Relay Documentation (`docs/RELAY_SETUP.md`)**:
+  - Complete guide detailing relay architecture (STUN NAT discovery + encrypted fallback relaying), VPS requirements, Docker container deployment, systemd unit file, Let's Encrypt TLS certs, client configuration, and verification.
 
 ---
 
