@@ -5,7 +5,7 @@ use clap::Parser;
 use groshe_core::{
     to_cbor, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId,
 };
-use groshe_store::ListProjection;
+use groshe_store::{ItemHistoryTracker, ListProjection};
 use groshe_sync::{Doc, GrosheSyncNode, NamespaceId};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -315,6 +315,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             node.set_entry(&doc, DocKey::item_check(item_id).to_key_bytes(), to_cbor(&check)?).await?;
             node.set_entry(&doc, DocKey::item_pos(item_id).to_key_bytes(), to_cbor(&next_pos)?).await?;
 
+            let history_path = data_dir.join("history.cbor");
+            let mut tracker = ItemHistoryTracker::load_from_path(&history_path).unwrap_or_default();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            tracker.record_item(&name, item_data.category.as_deref(), item_data.quantity, item_data.unit.as_deref(), now);
+            let _ = tracker.save_to_path(&history_path);
+
             if cli.json {
                 println!(
                     "{}",
@@ -346,6 +355,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             node.set_entry(&doc, DocKey::item_check(item_id).to_key_bytes(), to_cbor(&check)?).await?;
 
             let item_view = proj.get_item(&item_id).unwrap();
+            let history_path = data_dir.join("history.cbor");
+            let mut tracker = ItemHistoryTracker::load_from_path(&history_path).unwrap_or_default();
+            tracker.record_item(item_view.name(), item_view.data.category.as_deref(), item_view.data.quantity, item_view.data.unit.as_deref(), now);
+            let _ = tracker.save_to_path(&history_path);
+
             if cli.json {
                 println!("{}", serde_json::json!({ "status": "checked", "id": item_id.to_string() }));
             } else {
@@ -549,6 +563,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 println!("\nTotal: {} items ({} checked)", proj.item_count(), proj.checked_count());
+            }
+            node.shutdown().await?;
+        }
+
+        Commands::Suggest { limit, add_top, list } => {
+            let node = GrosheSyncNode::persistent(&data_dir).await?;
+            let (ns_id, doc) = resolve_target_doc(&node, list).await?;
+            let list_id = ListId(uuid::Uuid::from_bytes(ns_id.as_bytes()[..16].try_into().unwrap()));
+            let proj = load_projection(&node, &doc, list_id).await?;
+
+            let history_path = data_dir.join("history.cbor");
+            let tracker = ItemHistoryTracker::load_from_path(&history_path).unwrap_or_default();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            let active_names: Vec<String> = proj.sorted_items().iter().map(|i| i.name().to_string()).collect();
+            let suggestions = tracker.suggest_frequent(&active_names, limit, now);
+
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&suggestions)?);
+            } else if suggestions.is_empty() {
+                println!("No frequent item suggestions available yet. As you add and check off items, suggestions will appear here.");
+            } else {
+                println!("=== Frequent Item Suggestions for '{}' ===", proj.title());
+                for (idx, s) in suggestions.iter().enumerate() {
+                    let cat_str = s.category.as_deref().map(|c| format!(" [{c}]")).unwrap_or_default();
+                    let qty_str = if let Some(q) = s.default_quantity {
+                        format!(" (qty: {}{})", q, s.default_unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default())
+                    } else {
+                        String::new()
+                    };
+                    println!("  {}. {}{}{} (used {}x)", idx + 1, s.display_name, cat_str, qty_str, s.count);
+                }
+
+                if add_top {
+                    if let Some(top) = suggestions.first() {
+                        let last_pos = proj.sorted_items().last().map(|i| &i.position);
+                        let next_pos = if let Some(last) = last_pos {
+                            ItemPosition::after(last)?
+                        } else {
+                            ItemPosition::initial()
+                        };
+
+                        let item_id = ItemId::new_v7();
+                        let mut item_data = ItemData::new(&top.display_name)?;
+                        if let Some(q) = top.default_quantity {
+                            item_data = item_data.with_quantity(q, top.default_unit.clone())?;
+                        }
+                        if let Some(c) = &top.category {
+                            item_data = item_data.with_category(c.clone());
+                        }
+
+                        let check = ItemCheck::unchecked();
+                        node.set_entry(&doc, DocKey::item_data(item_id).to_key_bytes(), to_cbor(&item_data)?).await?;
+                        node.set_entry(&doc, DocKey::item_check(item_id).to_key_bytes(), to_cbor(&check)?).await?;
+                        node.set_entry(&doc, DocKey::item_pos(item_id).to_key_bytes(), to_cbor(&next_pos)?).await?;
+
+                        println!("\nAutomatically added top suggestion '{}' to '{}'!", top.display_name, proj.title());
+                    }
+                }
             }
             node.shutdown().await?;
         }

@@ -14,6 +14,9 @@ use tokio::sync::{broadcast, RwLock};
 use groshe_core::{from_cbor, CoreError, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId, ListMeta};
 use thiserror::Error;
 
+pub mod history;
+pub use history::{canonicalize_name, FrequentSuggestion, HistoryEntry, ItemHistoryTracker};
+
 /// 30-day tombstone retention period in seconds per §6.3.
 pub const TOMBSTONE_RETENTION_SECS: u64 = 30 * 24 * 60 * 60;
 
@@ -392,6 +395,7 @@ impl ListProjection {
 pub struct ReactiveStore {
     lists: Arc<RwLock<BTreeMap<ListId, ListProjection>>>,
     sender: broadcast::Sender<StoreEvent>,
+    history: Arc<RwLock<ItemHistoryTracker>>,
 }
 
 impl ReactiveStore {
@@ -400,7 +404,40 @@ impl ReactiveStore {
         Self {
             lists: Arc::new(RwLock::new(BTreeMap::new())),
             sender,
+            history: Arc::new(RwLock::new(ItemHistoryTracker::new())),
         }
+    }
+
+    /// Constructs a reactive store with pre-loaded item history.
+    pub fn with_history(capacity: usize, history: ItemHistoryTracker) -> Self {
+        let (sender, _) = broadcast::channel(capacity);
+        Self {
+            lists: Arc::new(RwLock::new(BTreeMap::new())),
+            sender,
+            history: Arc::new(RwLock::new(history)),
+        }
+    }
+
+    /// Access the underlying history tracker.
+    pub fn history(&self) -> Arc<RwLock<ItemHistoryTracker>> {
+        Arc::clone(&self.history)
+    }
+
+    /// Computes frequent suggestions for a given list, excluding currently active items.
+    pub async fn suggest_frequent(
+        &self,
+        list_id: &ListId,
+        limit: usize,
+        now_secs: u64,
+    ) -> Vec<FrequentSuggestion> {
+        let guard = self.lists.read().await;
+        let active_items: Vec<String> = if let Some(proj) = guard.get(list_id) {
+            proj.items.values().filter(|i| i.has_data).map(|i| i.name().to_string()).collect()
+        } else {
+            Vec::new()
+        };
+        let hist = self.history.read().await;
+        hist.suggest_frequent(&active_items, limit, now_secs)
     }
 
     /// Subscribes to real-time store mutation events.
@@ -442,6 +479,31 @@ impl ReactiveStore {
         let list = guard.entry(list_id).or_insert_with(|| ListProjection::new(list_id));
 
         if let Some(event) = list.apply_entry(key, value, timestamp)? {
+            match &event {
+                StoreEvent::ItemAdded { item, .. } | StoreEvent::ItemUpdated { item, .. } => {
+                    let mut hist = self.history.write().await;
+                    hist.record_item(
+                        item.name(),
+                        item.data.category.as_deref(),
+                        item.data.quantity,
+                        item.data.unit.as_deref(),
+                        timestamp,
+                    );
+                }
+                StoreEvent::ItemChecked { item_id, checked: true, .. } => {
+                    if let Some(item) = list.get_item(item_id) {
+                        let mut hist = self.history.write().await;
+                        hist.record_item(
+                            item.name(),
+                            item.data.category.as_deref(),
+                            item.data.quantity,
+                            item.data.unit.as_deref(),
+                            timestamp,
+                        );
+                    }
+                }
+                _ => {}
+            }
             // Ignore send errors if there are currently no active receivers
             let _ = self.sender.send(event);
         }
@@ -609,5 +671,16 @@ mod tests {
 
         let proj4 = store.get_list(&list_id).await.unwrap();
         assert_eq!(proj4.item_count(), 1);
+
+        // 9. Verify History Tracking via ReactiveStore
+        let suggestions = store.suggest_frequent(&list_id, 5, 200).await;
+        // Oat Milk is active on the list, so it should be excluded!
+        assert!(suggestions.is_empty());
+
+        let other_list = ListId::new_v7();
+        let suggestions_other = store.suggest_frequent(&other_list, 5, 200).await;
+        // On another list where Oat Milk is not active, it should be suggested!
+        assert_eq!(suggestions_other.len(), 1);
+        assert_eq!(suggestions_other[0].display_name, "Oat Milk");
     }
 }

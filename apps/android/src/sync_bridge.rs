@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use groshe_core::{
     parse_quick_add, to_cbor, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId,
 };
-use groshe_store::ListProjection;
+use groshe_store::{ItemHistoryTracker, ListProjection};
 use groshe_sync::{render_qr_terminal, Doc, GrosheSyncNode, LiveEvent, NamespaceId};
 use slint::{ModelRc, VecModel};
 use tokio::sync::mpsc;
@@ -179,6 +179,15 @@ pub fn spawn_sync_bridge(
             .ok()
             .map(Box::pin);
 
+        let history_path = storage_dir.join("history.cbor");
+        let mut history = ItemHistoryTracker::load_from_path(&history_path).unwrap_or_default();
+
+        let get_suggestions = |proj: &ListProjection, hist: &ItemHistoryTracker| -> Vec<slint::SharedString> {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let active_names: Vec<String> = proj.items.values().filter(|i| i.has_data).map(|i| i.name().to_string()).collect();
+            hist.suggest_frequent(&active_names, 4, now).into_iter().map(|s| s.display_name.into()).collect()
+        };
+
         // Initial UI state sync
         let list_id = ns_to_list_id(&active_ns_id);
         let mut current_proj = load_projection(&node, &active_doc, list_id)
@@ -193,12 +202,14 @@ pub fn spawn_sync_bridge(
         let title_str = current_proj.title().to_string();
         let active_id_str = active_ns_id.to_string();
 
+        let initial_suggestions = get_suggestions(&current_proj, &history);
         let _ = app_weak.upgrade_in_event_loop(move |app| {
             app.set_active_list_id(active_id_str.into());
             app.set_active_list_title(title_str.into());
             app.set_ticket_str(ticket_str.into());
             app.set_qr_ascii(qr_ascii.into());
             app.set_items(ModelRc::new(VecModel::from(initial_items)));
+            app.set_frequent_suggestions(ModelRc::new(VecModel::from(initial_suggestions)));
             app.set_lists(ModelRc::new(VecModel::from(initial_lists)));
         });
 
@@ -349,13 +360,19 @@ pub fn spawn_sync_bridge(
                                         let _ = node.set_entry(&active_doc, DocKey::item_pos(item_id).to_key_bytes(), pos_bytes).await;
                                     }
 
+                                    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                                    history.record_item(&parsed.name, data.category.as_deref(), data.quantity, data.unit.as_deref(), now);
+                                    let _ = history.save_to_path(&history_path);
+
                                     let lid = ns_to_list_id(&active_ns_id);
                                     if let Ok(p) = load_projection(&node, &active_doc, lid).await {
                                         current_proj = p;
                                         let items = projection_to_slint_items(&current_proj);
+                                        let suggestions = get_suggestions(&current_proj, &history);
                                         let lists = load_lists_info(&node).await;
                                         let _ = app_weak.upgrade_in_event_loop(move |app| {
                                             app.set_items(ModelRc::new(VecModel::from(items)));
+                                            app.set_frequent_suggestions(ModelRc::new(VecModel::from(suggestions)));
                                             app.set_lists(ModelRc::new(VecModel::from(lists)));
                                         });
                                     }

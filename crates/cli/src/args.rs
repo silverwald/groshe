@@ -149,6 +149,19 @@ pub enum Commands {
         list: Option<String>,
     },
 
+    /// Show frequent item suggestions from history with optional 1-key add
+    Suggest {
+        /// Maximum number of suggestions to display
+        #[arg(short, long, default_value = "5")]
+        limit: usize,
+        /// Automatically add the top suggestion to the list
+        #[arg(long)]
+        add_top: bool,
+        /// Target list ID or prefix
+        #[arg(short, long)]
+        list: Option<String>,
+    },
+
     /// Show network peers, listening addresses, and presence
     Peers {
         /// Target list ID or prefix

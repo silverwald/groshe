@@ -9,6 +9,7 @@ export component DetailScreen inherits Rectangle {
     in property <string> undo_toast_message: "";
     in-out property <string> new_item_input: "";
     in-out property <string> suggested_category: "General";
+    in property <[string]> frequent_suggestions: [];
 
     callback toggle_item_check(string /* id */);
     callback delete_item(string /* id */);
@@ -209,6 +210,56 @@ export component DetailScreen inherits Rectangle {
                         font_weight: 700;
                         vertical_alignment: center;
                         horizontal_alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Frequent Item Suggestions Chips
+        if root.frequent_suggestions.length > 0 : Rectangle {
+            height: 42px;
+            background: dark_mode ? Theme.dark_surface_card : Theme.light_surface_card;
+
+            HorizontalLayout {
+                padding_left: 12px;
+                padding_right: 12px;
+                padding_top: 6px;
+                padding_bottom: 6px;
+                spacing: 8px;
+                alignment: start;
+
+                Text {
+                    text: "Suggested:";
+                    font_size: 12px;
+                    color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                    vertical_alignment: center;
+                }
+
+                for item in root.frequent_suggestions : Rectangle {
+                    background: dark_mode ? #1e3d20 : #e8f5e9;
+                    border_radius: 12px;
+                    height: 28px;
+
+                    TouchArea {
+                        accessible_role: button;
+                        accessible_label: "Add " + item;
+                        clicked => {
+                            root.add_item(item);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding_left: 10px;
+                        padding_right: 10px;
+                        alignment: center;
+
+                        Text {
+                            text: "+ " + item;
+                            font_size: 13px;
+                            font_weight: 600;
+                            color: Theme.primary_light;
+                            vertical_alignment: center;
+                        }
                     }
                 }
             }

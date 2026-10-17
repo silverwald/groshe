@@ -35,6 +35,7 @@ export component AppWindow inherits Window {
     // Data models
     in property <[GroceryListInfo]> lists: [];
     in-out property <[GroceryItemData]> items: [];
+    in property <[string]> frequent_suggestions: [];
 
     // Callbacks to Rust runtime
     callback select_list(string /* id */, string /* title */);
@@ -159,6 +160,7 @@ export component AppWindow inherits Window {
                 dark_mode: root.dark_mode;
                 list_title: root.active_list_title;
                 items: root.items;
+                frequent_suggestions: root.frequent_suggestions;
                 show_undo_toast: root.show_undo_toast;
                 undo_toast_message: root.undo_toast_message;
                 toggle_item_check(id) => { root.toggle_item_check(id); }
