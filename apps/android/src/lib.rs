@@ -36,6 +36,7 @@ pub fn setup_app_window(app: &AppWindow, sync_handle: sync_bridge::SyncBridgeHan
 
     let sh = sync_handle.clone();
     app.on_toggle_item_check(move |id| {
+        android_runtime::trigger_haptic_feedback();
         sh.send(sync_bridge::SyncCommand::ToggleItemCheck { id: id.to_string() });
     });
 
@@ -83,9 +84,9 @@ pub fn setup_app_window(app: &AppWindow, sync_handle: sync_bridge::SyncBridgeHan
 pub extern "C" fn android_main(app: slint::android::AndroidApp) {
     tracing::info!("Initializing Groshe on Android...");
 
-    // Acquire MulticastLock via JNI for mDNS peer discovery
-    if let Err(e) = android_runtime::acquire_multicast_lock(&app) {
-        tracing::warn!("Could not acquire MulticastLock via JNI: {}", e);
+    // Acquire MulticastLock via JNI for mDNS peer discovery and register JVM/Activity
+    if let Err(e) = android_runtime::init_android_environment(&app) {
+        tracing::warn!("Could not initialize Android environment: {}", e);
     }
 
     // Resolve internal files directory for persistent Iroh storage

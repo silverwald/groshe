@@ -1,9 +1,17 @@
 //! Android process runtime and mobile environment management for Groshe.
 //!
 //! Handles Tokio multi-thread runtime initialization, internal storage resolution,
-//! and Android WifiManager MulticastLock acquisition for local mDNS peer discovery.
+//! Android WifiManager MulticastLock acquisition for local mDNS peer discovery,
+//! and haptic feedback via Android Vibrator JNI.
 
 use std::path::PathBuf;
+#[cfg(target_os = "android")]
+use std::sync::OnceLock;
+
+#[cfg(target_os = "android")]
+static JAVA_VM: OnceLock<jni::JavaVM> = OnceLock::new();
+#[cfg(target_os = "android")]
+static ACTIVITY_REF: OnceLock<jni::objects::GlobalRef> = OnceLock::new();
 
 /// Result of mobile runtime setup.
 pub struct MobileEnvironment {
@@ -21,8 +29,8 @@ pub fn init_tokio_runtime() -> std::io::Result<tokio::runtime::Runtime> {
 }
 
 #[cfg(target_os = "android")]
-/// Acquire Android WifiManager MulticastLock via JNI to allow mDNS discovery packets.
-pub fn acquire_multicast_lock(
+/// Initialize Android environment, caching JavaVM & Activity reference and acquiring MulticastLock.
+pub fn init_android_environment(
     app: &android_activity::AndroidApp,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use jni::objects::{JObject, JValue};
@@ -34,15 +42,20 @@ pub fn acquire_multicast_lock(
     }
 
     let vm = unsafe { JavaVM::from_raw(vm_ptr) }?;
-    let mut env = vm.attach_current_thread()?;
+    let _ = JAVA_VM.set(vm);
+    let vm = JAVA_VM.get().expect("JavaVM must be initialized");
 
     let activity_ptr = app.activity_as_ptr() as jni::sys::jobject;
     if activity_ptr.is_null() {
         return Err("Activity pointer is null".into());
     }
-    let activity = unsafe { JObject::from_raw(activity_ptr) };
 
-    // Fetch Context.WIFI_SERVICE
+    let mut env = vm.attach_current_thread()?;
+    let activity = unsafe { JObject::from_raw(activity_ptr) };
+    let global_activity = env.new_global_ref(&activity)?;
+    let _ = ACTIVITY_REF.set(global_activity);
+
+    // Fetch Context.WIFI_SERVICE and acquire MulticastLock
     let wifi_service_str = env.new_string("wifi")?;
     let wifi_manager = env
         .call_method(
@@ -53,33 +66,71 @@ pub fn acquire_multicast_lock(
         )?
         .l()?;
 
-    if wifi_manager.is_null() {
-        return Err("WifiManager service returned null".into());
+    if !wifi_manager.is_null() {
+        let lock_tag = env.new_string("groshe_mdns")?;
+        let lock = env
+            .call_method(
+                &wifi_manager,
+                "createMulticastLock",
+                "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;",
+                &[JValue::Object(&lock_tag)],
+            )?
+            .l()?;
+
+        if !lock.is_null() {
+            env.call_method(&lock, "setReferenceCounted", "(Z)V", &[JValue::Bool(1)])?;
+            env.call_method(&lock, "acquire", "()V", &[])?;
+            tracing::info!(
+                "Successfully acquired Android WifiManager MulticastLock for mDNS discovery"
+            );
+        }
     }
 
-    // Call wifiManager.createMulticastLock("groshe_mdns")
-    let lock_tag = env.new_string("groshe_mdns")?;
-    let lock = env
-        .call_method(
-            &wifi_manager,
-            "createMulticastLock",
-            "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;",
-            &[JValue::Object(&lock_tag)],
-        )?
-        .l()?;
-
-    if lock.is_null() {
-        return Err("Failed to create MulticastLock".into());
-    }
-
-    // lock.setReferenceCounted(true)
-    env.call_method(&lock, "setReferenceCounted", "(Z)V", &[JValue::Bool(1)])?;
-
-    // lock.acquire()
-    env.call_method(&lock, "acquire", "()V", &[])?;
-
-    tracing::info!("Successfully acquired Android WifiManager MulticastLock for mDNS discovery");
     Ok(())
+}
+
+#[cfg(target_os = "android")]
+/// Trigger tactile haptic feedback using Android Vibrator service via JNI.
+pub fn trigger_haptic_feedback() {
+    let Some(vm) = JAVA_VM.get() else { return };
+    let Some(activity_ref) = ACTIVITY_REF.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+
+    let vibrator_service_str = match env.new_string("vibrator") {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let vibrator = match env.call_method(
+        activity_ref.as_obj(),
+        "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;",
+        &[jni::objects::JValue::Object(&vibrator_service_str)],
+    ) {
+        Ok(v) => match v.l() {
+            Ok(obj) if !obj.is_null() => obj,
+            _ => return,
+        },
+        Err(_) => return,
+    };
+
+    // Vibrate 40ms for a crisp tactile check-off response
+    let _ = env.call_method(
+        &vibrator,
+        "vibrate",
+        "(J)V",
+        &[jni::objects::JValue::Long(40)],
+    );
+}
+
+#[cfg(not(target_os = "android"))]
+/// Trigger tactile haptic feedback (simulated / no-op on desktop preview).
+pub fn trigger_haptic_feedback() {
+    tracing::debug!("Haptic feedback simulated (desktop preview)");
 }
 
 #[cfg(target_os = "android")]

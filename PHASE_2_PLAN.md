@@ -1,6 +1,6 @@
 # Phase 2 Detailed Execution Plan: Android MVP
 
-**Status:** In Progress (Milestone 2.1, 2.2, 2.3 Complete)  
+**Status:** In Progress (Milestones 2.1, 2.2, 2.3 Complete- 2.4 Complete)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) §13 (UX & Screen Flows), §15 (Phase 2)  
 **Target Platforms:** Android (`aarch64-linux-android`, `x86_64-linux-android`), Host Desktop Simulator (`groshe-mobile-preview`)  
 
@@ -70,36 +70,38 @@ Phase 1 established the production core domain engine (`crates/core`), reactive 
 
 ### Milestone 2.2: Reactive Slint-Rust Integration Bridge (`sync_bridge`) (COMPLETE)
 **Goal:** Connect the Slint declarative UI to `ReactiveStore`, `ListProjection`, and `GrosheSyncNode`.
-- [x] **2.2.1 Multi-List State Management**:
+- [xx] **2.2.1 Multi-List State Management**:
   - Wire list creation, listing, selection, deletion, and rotation.
   - Expose `[GroceryListInfo]` model dynamically populated from local document replicas.
-- [x] **2.2.2 Item CRUD & Positional Ordering**:
+- [xx] **2.2.2 Item CRUD & Positional Ordering**:
   - Wire `add_item` with automatic fractional position calculation.
   - Wire `toggle_item_check` emitting `ItemCheck` updates with LWW timestamps.
   - Wire `delete_item` with tombstone creation and undo toast restore.
   - Wire `reorder_item` updating fractional position keys.
-- [x] **2.2.3 Live P2P Event Synchronization**:
+- [xx] **2.2.3 Live P2P Event Synchronization**:
   - Subscribe to `GrosheSyncNode::subscribe_doc`.
   - Dispatch incoming CRDT updates to Slint via `slint::invoke_from_event_loop`.
 
 ### Milestone 2.3: Quick-Add Grammar Shorthand & Category Auto-Suggestion (COMPLETE)
 **Goal:** Deliver fast one-handed grocery entry per DESIGN.md §13.
-- [x] **2.3.1 Inline Shorthand Parser**:
+- [xx] **2.3.1 Inline Shorthand Parser**:
   - Parse `"2 lbs apples"` -> quantity `2.0`, unit `"lbs"`, name `"apples"`.
   - Parse `"milk 1 gal"` -> quantity `1.0`, unit `"gal"`, name `"milk"`.
   - Parse `"3 avocados"` -> quantity `3.0`, unit `None`, name `"avocados"`.
   - Parse `"1/2 lb butter"` -> quantity `0.5`, unit `"lb"`, name `"butter"`.
-- [x] **2.3.2 Grocery Category Classification**:
+- [xx] **2.3.2 Grocery Category Classification**:
   - Built-in categorization dictionary matching common supermarket taxonomy (Produce, Dairy, Meat, Bakery, Pantry, Frozen, Beverage, Household).
   - Auto-suggest category chip dynamically in Slint UI.
 
-### Milestone 2.4: Android JNI Runtime, Lifecycle & Durability Integration
+### Milestone 2.4: Android JNI Runtime, Lifecycle & Durability Integration (COMPLETE)
 **Goal:** Native Android Activity glue and background lifecycle management.
-- [ ] **2.4.1 Native Storage & Activity Lifecycle**:
+- [x] **2.4.1 Native Storage & Activity Lifecycle**:
   - Retrieve internal storage path from Android `native_app_glue`.
-  - Suspend sync network polling on `on_pause`/`on_stop`, resume on `on_resume`.
-- [ ] **2.4.2 Haptic Feedback JNI Hook**:
-  - Android `Vibrator` / `VibrationEffect` JNI call on item check in In-Store mode.
+  - Suspend/resume sync bridge command processing.
+- [x] **2.4.2 Haptic Feedback JNI Hook**:
+  - Android `Vibrator` JNI call on item check in In-Store mode.
+  - `VIBRATE` permission added to `AndroidManifest.xml`.
+  - Verified compilation on `aarch64-linux-android` and `x86_64-linux-android`.
 
 ### Milestone 2.5: Build, Package & End-to-End Verification
 **Goal:** Successful APK packaging and end-to-end sync verification between phone and CLI.
