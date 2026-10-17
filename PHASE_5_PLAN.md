@@ -1,6 +1,6 @@
 # Phase 5 Detailed Execution Plan: Hardening & Extras
 
-**Status:** In Progress (Milestone 5.1 Complete)  
+**Status:** In Progress (Milestone 5.1 & 5.2 Complete)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) §10 (Mobile UI), §15 (Phase 5)  
 **Target Branch:** `feature/phase-5-hardening-extras`  
 
@@ -36,17 +36,19 @@ Phase 2 delivered the complete Android MVP (Slint multi-screen UI, reactive sync
   - Added `grocery suggest [--limit N] [--add-top]` command listing top items with usage count.
   - Automatically records items added or checked off in the CLI into `history.cbor`.
 
-### Milestone 5.2: Complete Backup, Export & Import
+### Milestone 5.2: Complete Backup, Export & Import (COMPLETE)
 **Goal:** Data portability and zero lock-in with human-readable exports and full backups.
-- [ ] **5.2.1 Format Encoders & Decoders (`crates/core/src/export.rs`)**:
+- [x] **5.2.1 Format Encoders & Decoders (`crates/core/src/export.rs`)**:
   - Full-fidelity JSON format: list metadata, active and checked items, notes, positions.
   - Human-readable Markdown format: grouped by category with `- [ ]` checkboxes and `- [x]` completed items.
   - Parser for importing markdown/JSON back into a list.
-- [ ] **5.2.2 CLI Import & Export Commands**:
-  - `grocery export [--list <id>] [--format json|markdown] [--output <path>]`
+  - 3 dedicated unit tests covering JSON roundtrip, GFM formatting, and Markdown parsing.
+- [x] **5.2.2 CLI Import & Export Commands (`crates/cli`)**:
+  - `grocery export [--list <id>] [--format json|markdown|text] [--output <path>]`
   - `grocery import <path> [--list <id>]`
-- [ ] **5.2.3 Slint Settings Screen Export**:
-  - Add "Export Active List (Markdown)" action in settings screen.
+- [x] **5.2.3 Slint Settings Screen Export (`apps/android`)**:
+  - Added "Export Active List (Markdown)" and "Full Backup (JSON)" actions in `settings_screen.slint`.
+  - Wired callbacks in `sync_bridge.rs` and `lib.rs` saving exports into `storage_dir/exports/`.
 
 ### Milestone 5.3: Item Photos via Iroh-Blobs
 **Goal:** Attach reference photos (e.g. specific packaging/brand) synced over Iroh content-addressed blobs.

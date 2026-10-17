@@ -1,8 +1,7 @@
 //! CLI command grammar and argument definitions for Groshe.
 
-use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
-use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -169,11 +168,14 @@ pub enum Commands {
         list: Option<String>,
     },
 
-    /// Export a list as human-readable JSON or text
+    /// Export a list as human-readable JSON or Markdown
     Export {
-        /// Output format (json or text)
-        #[arg(short, long, default_value = "text")]
+        /// Output format (json, markdown, or text)
+        #[arg(short, long, default_value = "markdown")]
         format: ExportFormat,
+        /// Optional destination file path (writes to stdout if omitted)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
         /// Target list ID or prefix
         #[arg(short, long)]
         list: Option<String>,
@@ -230,28 +232,12 @@ pub enum ListCommands {
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportFormat {
     Json,
+    Markdown,
     Text,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct ExportItemDto {
-    pub id: String,
-    pub name: String,
-    pub quantity: Option<f64>,
-    pub unit: Option<String>,
-    pub category: Option<String>,
-    pub note: Option<String>,
-    pub checked: bool,
-    pub position: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ExportListDto {
-    pub title: String,
-    pub schema_version: u32,
-    pub created_by: String,
-    pub items: Vec<ExportItemDto>,
-}
+pub type ExportItemDto = groshe_core::ExportItem;
+pub type ExportListDto = groshe_core::ExportList;
 
 pub fn resolve_data_dir(cli_dir: Option<PathBuf>) -> PathBuf {
     if let Some(dir) = cli_dir {

@@ -7,6 +7,7 @@ pub mod error;
 pub mod model;
 pub mod position;
 pub mod parser;
+pub mod export;
 pub mod schema;
 
 // Re-export common domain types for ergonomic workspace usage
@@ -14,6 +15,7 @@ pub use error::CoreError;
 pub use model::{ItemCheck, ItemData, ItemId, ListId, ListMeta};
 pub use position::{between_strings, ItemPosition};
 pub use parser::{parse_quick_add, suggest_category, ParsedItem};
+pub use export::{ExportItem, ExportList};
 pub use schema::{from_cbor, to_cbor, DocKey};
 
 #[cfg(test)]

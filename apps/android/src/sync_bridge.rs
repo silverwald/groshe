@@ -9,7 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use groshe_core::{
-    parse_quick_add, to_cbor, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId,
+    parse_quick_add, to_cbor, DocKey, ExportItem, ExportList, ItemCheck, ItemData, ItemId,
+    ItemPosition, ListId,
 };
 use groshe_store::{ItemHistoryTracker, ListProjection};
 use groshe_sync::{render_qr_terminal, Doc, GrosheSyncNode, LiveEvent, NamespaceId};
@@ -31,6 +32,8 @@ pub enum SyncCommand {
     UndoDelete,
     JoinTicket { ticket_str: String },
     PruneTombstones,
+    ExportActiveListMarkdown,
+    ExportActiveListJson,
 }
 
 /// Thread-safe handle for sending sync commands from Slint callbacks.
@@ -221,7 +224,7 @@ pub fn spawn_sync_bridge(
                         SyncCommand::CreateList { title } => {
                             if let Ok((new_doc, new_ticket, new_id)) = node.create_list_with_meta(&title, &author_name).await {
                                 active_doc = new_doc;
-                                                                active_ns_id = new_id;
+                                active_ns_id = new_id;
                                 events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                 let lid = ns_to_list_id(&active_ns_id);
@@ -250,7 +253,7 @@ pub fn spawn_sync_bridge(
                                 if let Ok(Some(d)) = node.open_list(ns_id).await {
                                     active_doc = d;
                                     active_ns_id = ns_id;
-                                                                        events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
+                                    events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                     let lid = ns_to_list_id(&active_ns_id);
                                     current_proj = load_projection(&node, &active_doc, lid).await.unwrap_or_else(|_| ListProjection::new(lid));
@@ -284,7 +287,7 @@ pub fn spawn_sync_bridge(
                                         if let Ok(Some(d)) = node.open_list(*first_id).await {
                                             active_doc = d;
                                             active_ns_id = *first_id;
-                                                                                        let lid = ns_to_list_id(&active_ns_id);
+                                            let lid = ns_to_list_id(&active_ns_id);
                                             current_proj = load_projection(&node, &active_doc, lid).await.unwrap_or_else(|_| ListProjection::new(lid));
                                         }
                                     }
@@ -307,7 +310,7 @@ pub fn spawn_sync_bridge(
                             if let Ok(ns_id) = NamespaceId::from_str(&id) {
                                 if let Ok((new_doc, new_ticket, new_id)) = node.rotate_list(ns_id, &author_name).await {
                                     active_doc = new_doc;
-                                                                        active_ns_id = new_id;
+                                    active_ns_id = new_id;
                                     events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                     let lid = ns_to_list_id(&active_ns_id);
@@ -454,7 +457,7 @@ pub fn spawn_sync_bridge(
                             if let Ok((doc, ticket)) = node.import_list_str(&ticket_str).await {
                                 active_doc = doc;
                                 active_ns_id = active_doc.id();
-                                                                events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
+                                events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                 let lid = ns_to_list_id(&active_ns_id);
                                 current_proj = load_projection(&node, &active_doc, lid).await.unwrap_or_else(|_| ListProjection::new(lid));
@@ -481,6 +484,86 @@ pub fn spawn_sync_bridge(
                         SyncCommand::PruneTombstones => {
                             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                             current_proj.prune_tombstones(now);
+                        }
+
+                        SyncCommand::ExportActiveListMarkdown => {
+                            let meta = node.get_list_meta(&active_doc).await.ok().flatten();
+                            let created_by = meta.as_ref().map(|m| m.created_by.clone()).unwrap_or_default();
+                            let created_at = meta.as_ref().map(|m| m.created_at).unwrap_or(0);
+                            let export_list = ExportList::new(
+                                current_proj.title().to_string(),
+                                created_by,
+                                created_at,
+                                current_proj
+                                    .sorted_items()
+                                    .into_iter()
+                                    .map(|i| ExportItem {
+                                        id: i.id,
+                                        name: i.name().to_string(),
+                                        quantity: i.data.quantity,
+                                        unit: i.data.unit.clone(),
+                                        category: i.data.category.clone(),
+                                        note: i.data.note.clone(),
+                                        checked: i.is_checked(),
+                                        position: i.position.to_string(),
+                                    })
+                                    .collect(),
+                            );
+                            let md = export_list.to_markdown();
+                            let exports_dir = storage_dir.join("exports");
+                            let _ = std::fs::create_dir_all(&exports_dir);
+                            let safe_title = current_proj.title().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+                            let filename = format!("{}.md", safe_title);
+                            let target_path = exports_dir.join(&filename);
+                            let status_msg = match std::fs::write(&target_path, md) {
+                                Ok(()) => format!("Exported to exports/{}", filename),
+                                Err(e) => format!("Export failed: {}", e),
+                            };
+                            let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                app.set_export_status_message(status_msg.into());
+                                app.set_show_export_status(true);
+                            });
+                        }
+
+                        SyncCommand::ExportActiveListJson => {
+                            let meta = node.get_list_meta(&active_doc).await.ok().flatten();
+                            let created_by = meta.as_ref().map(|m| m.created_by.clone()).unwrap_or_default();
+                            let created_at = meta.as_ref().map(|m| m.created_at).unwrap_or(0);
+                            let export_list = ExportList::new(
+                                current_proj.title().to_string(),
+                                created_by,
+                                created_at,
+                                current_proj
+                                    .sorted_items()
+                                    .into_iter()
+                                    .map(|i| ExportItem {
+                                        id: i.id,
+                                        name: i.name().to_string(),
+                                        quantity: i.data.quantity,
+                                        unit: i.data.unit.clone(),
+                                        category: i.data.category.clone(),
+                                        note: i.data.note.clone(),
+                                        checked: i.is_checked(),
+                                        position: i.position.to_string(),
+                                    })
+                                    .collect(),
+                            );
+                            let safe_title = current_proj.title().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+                            let filename = format!("{}.json", safe_title);
+                            let exports_dir = storage_dir.join("exports");
+                            let _ = std::fs::create_dir_all(&exports_dir);
+                            let target_path = exports_dir.join(&filename);
+                            let status_msg = match export_list.to_json_pretty() {
+                                Ok(json) => match std::fs::write(&target_path, json) {
+                                    Ok(()) => format!("Backup saved to exports/{}", filename),
+                                    Err(e) => format!("Backup write failed: {}", e),
+                                },
+                                Err(e) => format!("JSON encode failed: {}", e),
+                            };
+                            let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                app.set_export_status_message(status_msg.into());
+                                app.set_show_export_status(true);
+                            });
                         }
                     }
                 }
