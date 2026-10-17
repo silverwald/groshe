@@ -1,6 +1,6 @@
 # Phase 2 Detailed Execution Plan: Android MVP
 
-**Status:** In Progress (Milestone 2.1 Starting)  
+**Status:** In Progress (Milestone 2.1, 2.2, 2.3 Complete)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) §13 (UX & Screen Flows), §15 (Phase 2)  
 **Target Platforms:** Android (`aarch64-linux-android`, `x86_64-linux-android`), Host Desktop Simulator (`groshe-mobile-preview`)  
 
@@ -68,28 +68,29 @@ Phase 1 established the production core domain engine (`crates/core`), reactive 
   - Join modal: Text input for pasting ticket string, join action.
   - Settings screen: Author ID, device key, connected peers count, relay status, tombstone pruning.
 
-### Milestone 2.2: Reactive Slint-Rust Integration Bridge (`sync_bridge`)
+### Milestone 2.2: Reactive Slint-Rust Integration Bridge (`sync_bridge`) (COMPLETE)
 **Goal:** Connect the Slint declarative UI to `ReactiveStore`, `ListProjection`, and `GrosheSyncNode`.
-- [ ] **2.2.1 Multi-List State Management**:
+- [x] **2.2.1 Multi-List State Management**:
   - Wire list creation, listing, selection, deletion, and rotation.
   - Expose `[GroceryListInfo]` model dynamically populated from local document replicas.
-- [ ] **2.2.2 Item CRUD & Positional Ordering**:
+- [x] **2.2.2 Item CRUD & Positional Ordering**:
   - Wire `add_item` with automatic fractional position calculation.
   - Wire `toggle_item_check` emitting `ItemCheck` updates with LWW timestamps.
   - Wire `delete_item` with tombstone creation and undo toast restore.
   - Wire `reorder_item` updating fractional position keys.
-- [ ] **2.2.3 Live P2P Event Synchronization**:
+- [x] **2.2.3 Live P2P Event Synchronization**:
   - Subscribe to `GrosheSyncNode::subscribe_doc`.
   - Dispatch incoming CRDT updates to Slint via `slint::invoke_from_event_loop`.
 
-### Milestone 2.3: Quick-Add Grammar Shorthand & Category Auto-Suggestion
+### Milestone 2.3: Quick-Add Grammar Shorthand & Category Auto-Suggestion (COMPLETE)
 **Goal:** Deliver fast one-handed grocery entry per DESIGN.md §13.
-- [ ] **2.3.1 Inline Shorthand Parser**:
+- [x] **2.3.1 Inline Shorthand Parser**:
   - Parse `"2 lbs apples"` -> quantity `2.0`, unit `"lbs"`, name `"apples"`.
   - Parse `"milk 1 gal"` -> quantity `1.0`, unit `"gal"`, name `"milk"`.
   - Parse `"3 avocados"` -> quantity `3.0`, unit `None`, name `"avocados"`.
-- [ ] **2.3.2 Grocery Category Classification**:
-  - Built-in categorization dictionary matching common supermarket taxonomy (Produce, Dairy, Meat, Bakery, Pantry, Frozen, Household).
+  - Parse `"1/2 lb butter"` -> quantity `0.5`, unit `"lb"`, name `"butter"`.
+- [x] **2.3.2 Grocery Category Classification**:
+  - Built-in categorization dictionary matching common supermarket taxonomy (Produce, Dairy, Meat, Bakery, Pantry, Frozen, Beverage, Household).
   - Auto-suggest category chip dynamically in Slint UI.
 
 ### Milestone 2.4: Android JNI Runtime, Lifecycle & Durability Integration
