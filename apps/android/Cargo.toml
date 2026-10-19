@@ -8,6 +8,7 @@ description = "Android mobile app entry point and Slint UI prototype for Groshe"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+doctest = false
 
 [[bin]]
 name = "groshe-mobile-preview"

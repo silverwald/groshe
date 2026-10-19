@@ -14,6 +14,7 @@ path = "src/main.rs"
 groshe-core = { workspace = true }
 groshe-sync = { workspace = true }
 groshe-store = { workspace = true }
+groshe-web = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true, features = ["alloc"] }
 serde_json.workspace = true

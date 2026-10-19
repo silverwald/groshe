@@ -5,6 +5,7 @@
 //! - `"milk 1 gal"` -> qty: 1.0, unit: "gal", name: "milk", category: "Dairy & Eggs"
 //! - `"6 eggs"` -> qty: 6.0, unit: None, name: "eggs", category: "Dairy & Eggs"
 //! - `"sourdough bread"` -> qty: None, unit: None, name: "sourdough bread", category: "Bakery"
+//! - `"2 gal organic milk @dairy"` -> qty: 2.0, unit: "gal", name: "organic milk", category: "dairy"
 
 /// Materialized parsed grocery item ready for `ItemData` construction.
 #[derive(Debug, Clone, PartialEq)]
@@ -38,45 +39,37 @@ const CATEGORY_MAP: &[(&str, &[&str])] = &[
             "bananas",
             "avocado",
             "avocados",
-            "tomato",
-            "tomatoes",
-            "potato",
-            "potatoes",
-            "onion",
-            "onions",
-            "garlic",
-            "lettuce",
-            "spinach",
-            "kale",
-            "carrot",
-            "carrots",
-            "broccoli",
-            "cucumber",
-            "cucumbers",
+            "orange",
+            "oranges",
             "lemon",
             "lemons",
             "lime",
             "limes",
+            "tomato",
+            "tomatoes",
+            "onion",
+            "onions",
+            "garlic",
+            "potato",
+            "potatoes",
+            "carrot",
+            "carrots",
+            "lettuce",
+            "spinach",
+            "kale",
+            "broccoli",
+            "pepper",
+            "peppers",
+            "cucumber",
+            "cucumbers",
             "berry",
             "berries",
             "strawberry",
             "strawberries",
             "blueberry",
             "blueberries",
-            "orange",
-            "oranges",
-            "pepper",
-            "peppers",
-            "mushroom",
-            "mushrooms",
-            "cilantro",
-            "parsley",
-            "basil",
-            "ginger",
             "grape",
             "grapes",
-            "watermelon",
-            "melon",
             "celery",
             "squash",
             "zucchini",
@@ -259,7 +252,7 @@ const CATEGORY_MAP: &[(&str, &[&str])] = &[
     ),
 ];
 
-/// Parses inline quantity, optional unit, item name, and suggests category.
+/// Parses inline quantity, optional unit, item name, and suggests or overrides category.
 pub fn parse_quick_add(input: &str) -> ParsedItem {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -271,13 +264,25 @@ pub fn parse_quick_add(input: &str) -> ParsedItem {
         };
     }
 
-    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    // Extract explicit @category tag if present
+    let mut explicit_category = None;
+    let mut tokens: Vec<&str> = Vec::new();
+    for token in trimmed.split_whitespace() {
+        if let Some(cat) = token.strip_prefix('@') {
+            if !cat.is_empty() {
+                explicit_category = Some(cat.to_string());
+                continue;
+            }
+        }
+        tokens.push(token);
+    }
+
     if tokens.is_empty() {
         return ParsedItem {
             name: trimmed.to_string(),
             quantity: None,
             unit: None,
-            category: suggest_category(trimmed),
+            category: explicit_category.or_else(|| suggest_category(trimmed)),
         };
     }
 
@@ -288,7 +293,7 @@ pub fn parse_quick_add(input: &str) -> ParsedItem {
             let unit_candidate = tokens[1].to_lowercase();
             if KNOWN_UNITS.contains(&unit_candidate.as_str()) && tokens.len() > 2 {
                 let name = tokens[2..].join(" ");
-                let category = suggest_category(&name);
+                let category = explicit_category.clone().or_else(|| suggest_category(&name));
                 return ParsedItem {
                     name,
                     quantity: Some(qty),
@@ -298,7 +303,7 @@ pub fn parse_quick_add(input: &str) -> ParsedItem {
             } else {
                 // No unit, remainder is item name
                 let name = tokens[1..].join(" ");
-                let category = suggest_category(&name);
+                let category = explicit_category.clone().or_else(|| suggest_category(&name));
                 return ParsedItem {
                     name,
                     quantity: Some(qty),
@@ -316,7 +321,7 @@ pub fn parse_quick_add(input: &str) -> ParsedItem {
         if KNOWN_UNITS.contains(&unit_candidate.as_str()) {
             if let Some(qty) = parse_quantity_token(tokens[last_idx - 1]) {
                 let name = tokens[..last_idx - 1].join(" ");
-                let category = suggest_category(&name);
+                let category = explicit_category.clone().or_else(|| suggest_category(&name));
                 return ParsedItem {
                     name,
                     quantity: Some(qty),
@@ -331,7 +336,7 @@ pub fn parse_quick_add(input: &str) -> ParsedItem {
         let last_idx = tokens.len() - 1;
         if let Some(qty) = parse_quantity_token(tokens[last_idx]) {
             let name = tokens[..last_idx].join(" ");
-            let category = suggest_category(&name);
+            let category = explicit_category.clone().or_else(|| suggest_category(&name));
             return ParsedItem {
                 name,
                 quantity: Some(qty),
@@ -342,8 +347,8 @@ pub fn parse_quick_add(input: &str) -> ParsedItem {
     }
 
     // 3. Fallback: Entire input is item name
-    let name = trimmed.to_string();
-    let category = suggest_category(&name);
+    let name = tokens.join(" ");
+    let category = explicit_category.or_else(|| suggest_category(&name));
     ParsedItem {
         name,
         quantity: None,
@@ -419,6 +424,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_explicit_category_tag() {
+        let parsed = parse_quick_add("2 gal organic milk @dairy");
+        assert_eq!(parsed.name, "organic milk");
+        assert_eq!(parsed.quantity, Some(2.0));
+        assert_eq!(parsed.unit.as_deref(), Some("gal"));
+        assert_eq!(parsed.category.as_deref(), Some("dairy"));
+    }
+
+    #[test]
     fn test_parse_fraction_quantity() {
         let parsed = parse_quick_add("1/2 lb butter");
         assert_eq!(parsed.name, "butter");
@@ -429,10 +443,10 @@ mod tests {
 
     #[test]
     fn test_parse_plain_item_name() {
-        let parsed = parse_quick_add("sourdough bread");
-        assert_eq!(parsed.name, "sourdough bread");
+        let parsed = parse_quick_add("organic bananas");
+        assert_eq!(parsed.name, "organic bananas");
         assert_eq!(parsed.quantity, None);
         assert_eq!(parsed.unit, None);
-        assert_eq!(parsed.category.as_deref(), Some("Bakery"));
+        assert_eq!(parsed.category.as_deref(), Some("Produce"));
     }
 }
