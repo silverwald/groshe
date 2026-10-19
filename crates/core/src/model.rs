@@ -1,8 +1,8 @@
 //! Core domain entities for lists and items.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::CoreError;
@@ -132,6 +132,8 @@ pub struct ItemData {
     pub unit: Option<String>,
     pub category: Option<String>,
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_hash: Option<[u8; 32]>,
 }
 
 impl ItemData {
@@ -149,6 +151,7 @@ impl ItemData {
             unit: None,
             category: None,
             note: None,
+            photo_hash: None,
         })
     }
 
@@ -172,6 +175,18 @@ impl ItemData {
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.note = Some(note.into());
         self
+    }
+
+    /// Sets optional photo attachment hash (Blake3 / Iroh blob hash).
+    pub fn with_photo_hash(mut self, hash: [u8; 32]) -> Self {
+        self.photo_hash = Some(hash);
+        self
+    }
+
+    /// Returns hex-encoded representation of the photo Blake3 hash if present.
+    pub fn photo_hash_hex(&self) -> Option<String> {
+        self.photo_hash
+            .map(|h| h.iter().map(|b| format!("{:02x}", b)).collect())
     }
 }
 

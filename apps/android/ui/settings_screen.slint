@@ -7,9 +7,13 @@ export component SettingsScreen inherits Rectangle {
     in property <string> node_id: "unknown";
     in property <int> peer_count: 0;
     in property <string> relay_status: "Active";
+    in property <bool> show_export_status: false;
+    in property <string> export_status_message: "";
 
     callback toggle_dark_mode();
     callback prune_tombstones();
+    callback export_active_list();
+    callback export_json_backup();
 
     background: dark_mode ? Theme.dark_bg : Theme.light_bg;
 
@@ -107,6 +111,55 @@ export component SettingsScreen inherits Rectangle {
                             font_weight: 600;
                             color: Theme.primary_light;
                         }
+                    }
+                }
+            }
+
+            // Export & Portability Section
+            Rectangle {
+                border_radius: 16px;
+                background: dark_mode ? Theme.dark_surface : Theme.light_surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Data Portability & Backup";
+                        font_size: 17px;
+                        font_weight: 700;
+                        color: dark_mode ? Theme.dark_text : Theme.light_text;
+                    }
+
+                    Text {
+                        text: "Export active list to Markdown checklist or full JSON backup for zero vendor lock-in.";
+                        font_size: 13px;
+                        color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                        wrap: word_wrap;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+
+                        Button {
+                            horizontal_stretch: 1;
+                            text: "📋 Markdown Checklist";
+                            clicked => { root.export_active_list(); }
+                        }
+
+                        Button {
+                            horizontal_stretch: 1;
+                            text: "💾 JSON Backup";
+                            clicked => { root.export_json_backup(); }
+                        }
+                    }
+
+                    if root.show_export_status : Text {
+                        text: root.export_status_message;
+                        font_size: 13px;
+                        color: Theme.primary_light;
+                        font_weight: 600;
+                        wrap: word_wrap;
                     }
                 }
             }

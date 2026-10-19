@@ -99,16 +99,27 @@ export component InStoreScreen inherits Rectangle {
                             }
                         }
 
-                        // Large item name and quantity
+                        // Large item name, photo indicator, and quantity
                         VerticalLayout {
                             alignment: center;
                             spacing: 4px;
 
-                            Text {
-                                text: item.name;
-                                font_size: 20px;
-                                font_weight: 700;
-                                color: #ffffff;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                Text {
+                                    text: item.name;
+                                    font_size: 20px;
+                                    font_weight: 700;
+                                    color: #ffffff;
+                                }
+
+                                if item.has_photo : Text {
+                                    text: "📷";
+                                    font_size: 16px;
+                                    vertical_alignment: center;
+                                }
                             }
 
                             if item.quantity != "" : Text {
@@ -178,11 +189,22 @@ export component InStoreScreen inherits Rectangle {
                             vertical_alignment: center;
                         }
 
-                        Text {
-                            text: item.name;
-                            font_size: 16px;
-                            color: #666666;
-                            vertical_alignment: center;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+
+                            Text {
+                                text: item.name;
+                                font_size: 16px;
+                                color: #666666;
+                                vertical_alignment: center;
+                            }
+
+                            if item.has_photo : Text {
+                                text: "📷";
+                                font_size: 13px;
+                                vertical_alignment: center;
+                            }
                         }
 
                         Text {

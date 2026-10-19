@@ -3,6 +3,7 @@
 //! Manages Iroh Endpoint, iroh-docs replicas, DocTicket parsing/creation,
 //! list rotation, and network presence.
 
+pub mod config;
 pub mod identity;
 pub mod presence;
 pub mod qr;
@@ -16,17 +17,18 @@ use groshe_core::{from_cbor, to_cbor, DocKey, ListId, ListMeta};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use config::GrosheConfig;
 pub use identity::DeviceIdentity;
 pub use presence::{derive_presence_topic, PresencePayload};
 pub use qr::render_qr_terminal;
 
 pub use iroh::endpoint::presets;
 pub use iroh::protocol::Router;
-pub use iroh::Endpoint;
+pub use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl};
 pub use iroh_blobs::api::Store as BlobsStore;
 pub use iroh_blobs::store::fs::FsStore;
 pub use iroh_blobs::store::mem::MemStore;
-pub use iroh_blobs::BlobsProtocol;
+pub use iroh_blobs::{BlobsProtocol, Hash};
 pub use iroh_docs::api::protocol::{AddrInfoOptions, ShareMode};
 pub use iroh_docs::api::Doc;
 pub use iroh_docs::engine::LiveEvent;
@@ -75,9 +77,11 @@ pub struct GrosheSyncNode {
     endpoint: Endpoint,
     docs: Docs,
     blobs: BlobsProtocol,
+    blobs_store: BlobsStore,
     gossip: Gossip,
     router: Arc<Router>,
     author_id: AuthorId,
+    config: GrosheConfig,
 }
 
 impl GrosheSyncNode {
@@ -93,7 +97,7 @@ impl GrosheSyncNode {
         let blobs = BlobsProtocol::new(&blobs_api, None);
 
         let docs = Docs::memory()
-            .spawn(endpoint.clone(), blobs_api, gossip.clone())
+            .spawn(endpoint.clone(), blobs_api.clone(), gossip.clone())
             .await
             .map_err(|e| SyncError::Doc(e.to_string()))?;
 
@@ -115,9 +119,11 @@ impl GrosheSyncNode {
             endpoint,
             docs,
             blobs,
+            blobs_store: blobs_api,
             gossip,
             router: Arc::new(router),
             author_id,
+            config: GrosheConfig::default(),
         })
     }
 
@@ -126,11 +132,33 @@ impl GrosheSyncNode {
         let dir = data_dir.as_ref();
         tokio::fs::create_dir_all(dir).await?;
 
+        // Load or create configuration (groshe.toml)
+        let config = GrosheConfig::load_or_create(dir).await?;
+
         // Load or create persistent cryptographic identity
         let mut identity = DeviceIdentity::load_or_create(dir).await?;
 
+        let relay_mode = if config.is_relay_disabled() {
+            RelayMode::Disabled
+        } else if let Some(url_str) = config.custom_relay_url() {
+            match url_str.parse::<RelayUrl>() {
+                Ok(url) => RelayMode::Custom(RelayMap::from(url)),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to parse custom relay URL '{}': {}. Falling back to default relay.",
+                        url_str,
+                        e
+                    );
+                    RelayMode::Default
+                }
+            }
+        } else {
+            RelayMode::Default
+        };
+
         let endpoint = Endpoint::builder(presets::N0)
             .secret_key(identity.secret_key.clone())
+            .relay_mode(relay_mode)
             .bind()
             .await
             .map_err(|e| SyncError::Endpoint(e.to_string()))?;
@@ -148,7 +176,7 @@ impl GrosheSyncNode {
         let docs_path = dir.join("docs");
         tokio::fs::create_dir_all(&docs_path).await?;
         let docs = Docs::persistent(docs_path)
-            .spawn(endpoint.clone(), blobs_api, gossip.clone())
+            .spawn(endpoint.clone(), blobs_api.clone(), gossip.clone())
             .await
             .map_err(|e| SyncError::Doc(e.to_string()))?;
 
@@ -179,10 +207,16 @@ impl GrosheSyncNode {
             endpoint,
             docs,
             blobs,
+            blobs_store: blobs_api,
             gossip,
             router: Arc::new(router),
             author_id,
+            config,
         })
+    }
+
+    pub fn config(&self) -> &GrosheConfig {
+        &self.config
     }
 
     pub fn endpoint(&self) -> &Endpoint {
@@ -195,6 +229,10 @@ impl GrosheSyncNode {
 
     pub fn blobs(&self) -> &BlobsProtocol {
         &self.blobs
+    }
+
+    pub fn blobs_store(&self) -> &BlobsStore {
+        &self.blobs_store
     }
 
     pub fn gossip(&self) -> &Gossip {
@@ -234,13 +272,13 @@ impl GrosheSyncNode {
 
         let meta = ListMeta::new(title, author_name, now)?;
         let meta_bytes = to_cbor(&meta)?;
-        self.set_entry(&doc, DocKey::Meta.to_key_bytes(), meta_bytes).await?;
+        self.set_entry(&doc, DocKey::Meta.to_key_bytes(), meta_bytes)
+            .await?;
 
         Ok((doc, ticket, ns_id))
     }
 
-    /// Generates a sharing DocTicket for an existing document.
-        /// Generates a sharing DocTicket for an existing document (alias for `share_ticket`).
+    /// Generates a sharing DocTicket for an existing document (alias for `share_ticket`).
     pub async fn ticket(&self, doc: &Doc) -> Result<DocTicket, SyncError> {
         self.share_ticket(doc).await
     }
@@ -255,6 +293,7 @@ impl GrosheSyncNode {
         }
         Ok(())
     }
+
     pub async fn share_ticket(&self, doc: &Doc) -> Result<DocTicket, SyncError> {
         doc.share(ShareMode::Write, AddrInfoOptions::RelayAndAddresses)
             .await
@@ -342,7 +381,13 @@ impl GrosheSyncNode {
     pub async fn import_list_with_events(
         &self,
         ticket: DocTicket,
-    ) -> Result<(Doc, impl futures_util::Stream<Item = anyhow::Result<LiveEvent>>), SyncError> {
+    ) -> Result<
+        (
+            Doc,
+            impl futures_util::Stream<Item = anyhow::Result<LiveEvent>>,
+        ),
+        SyncError,
+    > {
         self.docs
             .import_and_subscribe(ticket)
             .await
@@ -392,26 +437,27 @@ impl GrosheSyncNode {
         Ok(list)
     }
 
-    /// Set a key-value entry in a document using the node's author identity.
-        /// Delete an entry or key prefix in a document using the node's author identity.
-    pub async fn delete_entry(
-        &self,
-        doc: &Doc,
-        key: impl AsRef<[u8]>,
-    ) -> Result<usize, SyncError> {
+    /// Delete an entry or key prefix in a document using the node's author identity.
+    pub async fn delete_entry(&self, doc: &Doc, key: impl AsRef<[u8]>) -> Result<usize, SyncError> {
         doc.del(self.author_id, key.as_ref().to_vec())
             .await
             .map_err(|e| SyncError::Doc(e.to_string()))
     }
+
+    /// Set a key-value entry in a document using the node's author identity.
     pub async fn set_entry(
         &self,
         doc: &Doc,
         key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
     ) -> Result<(), SyncError> {
-        doc.set_bytes(self.author_id, key.as_ref().to_vec(), value.as_ref().to_vec())
-            .await
-            .map_err(|e| SyncError::Doc(e.to_string()))?;
+        doc.set_bytes(
+            self.author_id,
+            key.as_ref().to_vec(),
+            value.as_ref().to_vec(),
+        )
+        .await
+        .map_err(|e| SyncError::Doc(e.to_string()))?;
         Ok(())
     }
 
@@ -475,6 +521,35 @@ impl GrosheSyncNode {
         Ok(entries)
     }
 
+    /// Store a photo attachment blob in Iroh-Blobs (capped at 256KB thumbnail per §15).
+    pub async fn add_photo_blob(&self, data: &[u8]) -> Result<[u8; 32], SyncError> {
+        const MAX_PHOTO_SIZE: usize = 256 * 1024; // 256KB cap
+        if data.len() > MAX_PHOTO_SIZE {
+            return Err(SyncError::Other(format!(
+                "Photo size ({} bytes) exceeds maximum allowed thumbnail limit of 256KB",
+                data.len()
+            )));
+        }
+        let tag_info = self
+            .blobs_store
+            .add_slice(data)
+            .with_tag()
+            .await
+            .map_err(|e| SyncError::Storage(e.to_string()))?;
+        Ok(*tag_info.hash.as_bytes())
+    }
+
+    /// Retrieve a photo attachment blob by its 32-byte Blake3 / Iroh content hash.
+    pub async fn get_photo_blob(&self, hash_bytes: &[u8; 32]) -> Result<Vec<u8>, SyncError> {
+        let hash = iroh_blobs::Hash::from(*hash_bytes);
+        let bytes = self
+            .blobs_store
+            .get_bytes(hash)
+            .await
+            .map_err(|e| SyncError::Storage(e.to_string()))?;
+        Ok(bytes.to_vec())
+    }
+
     /// Broadcast a presence update for a list over gossip.
     pub async fn publish_presence(
         &self,
@@ -523,7 +598,10 @@ mod tests {
     async fn test_groshe_sync_node_persistent() {
         let tmp = tempfile::tempdir().unwrap();
         let node = GrosheSyncNode::persistent(tmp.path()).await.unwrap();
-        let (doc, _ticket, id) = node.create_list_with_meta("Safeway", "alice").await.unwrap();
+        let (doc, _ticket, id) = node
+            .create_list_with_meta("Safeway", "alice")
+            .await
+            .unwrap();
 
         let meta = node.get_list_meta(&doc).await.unwrap().unwrap();
         assert_eq!(meta.title, "Safeway");
@@ -532,6 +610,60 @@ mod tests {
         // Verify list_ids contains the new namespace
         let ids = node.list_ids().await.unwrap();
         assert!(ids.contains(&id));
+    }
+
+    #[tokio::test]
+    async fn test_persistent_node_with_custom_relay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let toml_content = r#"
+[network]
+relay_url = "https://relay.sovereign.local"
+"#;
+        tokio::fs::write(tmp.path().join("groshe.toml"), toml_content).await.unwrap();
+
+        let node = GrosheSyncNode::persistent(tmp.path()).await.unwrap();
+        assert_eq!(
+            node.config().custom_relay_url(),
+            Some("https://relay.sovereign.local")
+        );
+        assert!(!node.config().is_relay_disabled());
+        node.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_persistent_node_with_disabled_relay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let toml_content = r#"
+[network]
+relay_url = "disabled"
+"#;
+        tokio::fs::write(tmp.path().join("groshe.toml"), toml_content).await.unwrap();
+
+        let node = GrosheSyncNode::persistent(tmp.path()).await.unwrap();
+        assert_eq!(node.config().custom_relay_url(), None);
+        assert!(node.config().is_relay_disabled());
+        node.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_photo_blob_storage_and_cap() {
+        let node = GrosheSyncNode::memory().await.unwrap();
+
+        // 1. Valid photo within 256KB cap
+        let photo_bytes = vec![0x42u8; 1024]; // 1KB sample image
+        let hash = node.add_photo_blob(&photo_bytes).await.unwrap();
+        assert_ne!(hash, [0u8; 32]);
+
+        // Retrieve and verify roundtrip
+        let retrieved = node.get_photo_blob(&hash).await.unwrap();
+        assert_eq!(retrieved, photo_bytes);
+
+        // 2. Reject photo exceeding 256KB cap
+        let oversized = vec![0xFFu8; 256 * 1024 + 1];
+        let err = node.add_photo_blob(&oversized).await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("exceeds maximum allowed thumbnail limit"));
     }
 
     #[tokio::test]

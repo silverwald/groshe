@@ -69,6 +69,16 @@ pub fn setup_app_window(app: &AppWindow, sync_handle: sync_bridge::SyncBridgeHan
         sh.send(sync_bridge::SyncCommand::PruneTombstones);
     });
 
+    let sh = sync_handle.clone();
+    app.on_export_active_list(move || {
+        sh.send(sync_bridge::SyncCommand::ExportActiveListMarkdown);
+    });
+
+    let sh = sync_handle.clone();
+    app.on_export_json_backup(move || {
+        sh.send(sync_bridge::SyncCommand::ExportActiveListJson);
+    });
+
     let app_weak = app.as_weak();
     app.on_copy_ticket(move || {
         if let Some(app) = app_weak.upgrade() {

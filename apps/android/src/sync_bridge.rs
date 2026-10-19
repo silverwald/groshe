@@ -1,4 +1,4 @@
-//! Reactive sync bridge connecting Slint UI with GrosheSyncNode and ReactiveStore.
+﻿//! Reactive sync bridge connecting Slint UI with GrosheSyncNode and ReactiveStore.
 //!
 //! Handles background Iroh P2P synchronization, CRDT document mutations,
 //! multi-list management, live event streaming, and Slint view updates.
@@ -9,9 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use groshe_core::{
-    parse_quick_add, to_cbor, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId,
+    parse_quick_add, to_cbor, DocKey, ExportItem, ExportList, ItemCheck, ItemData, ItemId,
+    ItemPosition, ListId,
 };
-use groshe_store::ListProjection;
+use groshe_store::{ItemHistoryTracker, ListProjection};
 use groshe_sync::{render_qr_terminal, Doc, GrosheSyncNode, LiveEvent, NamespaceId};
 use slint::{ModelRc, VecModel};
 use tokio::sync::mpsc;
@@ -31,6 +32,8 @@ pub enum SyncCommand {
     UndoDelete,
     JoinTicket { ticket_str: String },
     PruneTombstones,
+    ExportActiveListMarkdown,
+    ExportActiveListJson,
 }
 
 /// Thread-safe handle for sending sync commands from Slint callbacks.
@@ -83,6 +86,7 @@ fn projection_to_slint_items(proj: &ListProjection) -> Vec<GroceryItemData> {
             note: item.data.note.clone().unwrap_or_default().into(),
             checked: item.is_checked(),
             position: item.position.to_string().into(),
+            has_photo: item.data.photo_hash.is_some(),
         })
         .collect()
 }
@@ -140,10 +144,17 @@ pub fn spawn_sync_bridge(
         // Push identity info to Slint settings
         let aid_clone = author_id.clone();
         let nid_clone = node_id.clone();
+        let relay_status = if let Some(relay) = node.config().custom_relay_url() {
+            format!("Custom: {relay}")
+        } else if node.config().is_relay_disabled() {
+            "Disabled (LAN only)".to_string()
+        } else {
+            "Connected (Default)".to_string()
+        };
         let _ = app_weak.upgrade_in_event_loop(move |app| {
             app.set_author_id(aid_clone.into());
             app.set_node_id(nid_clone.into());
-            app.set_relay_status("Connected".into());
+            app.set_relay_status(relay_status.into());
         });
 
         // Load existing document or create default list
@@ -179,6 +190,15 @@ pub fn spawn_sync_bridge(
             .ok()
             .map(Box::pin);
 
+        let history_path = storage_dir.join("history.cbor");
+        let mut history = ItemHistoryTracker::load_from_path(&history_path).unwrap_or_default();
+
+        let get_suggestions = |proj: &ListProjection, hist: &ItemHistoryTracker| -> Vec<slint::SharedString> {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let active_names: Vec<String> = proj.items.values().filter(|i| i.has_data).map(|i| i.name().to_string()).collect();
+            hist.suggest_frequent(&active_names, 4, now).into_iter().map(|s| s.display_name.into()).collect()
+        };
+
         // Initial UI state sync
         let list_id = ns_to_list_id(&active_ns_id);
         let mut current_proj = load_projection(&node, &active_doc, list_id)
@@ -193,12 +213,14 @@ pub fn spawn_sync_bridge(
         let title_str = current_proj.title().to_string();
         let active_id_str = active_ns_id.to_string();
 
+        let initial_suggestions = get_suggestions(&current_proj, &history);
         let _ = app_weak.upgrade_in_event_loop(move |app| {
             app.set_active_list_id(active_id_str.into());
             app.set_active_list_title(title_str.into());
             app.set_ticket_str(ticket_str.into());
             app.set_qr_ascii(qr_ascii.into());
             app.set_items(ModelRc::new(VecModel::from(initial_items)));
+            app.set_frequent_suggestions(ModelRc::new(VecModel::from(initial_suggestions)));
             app.set_lists(ModelRc::new(VecModel::from(initial_lists)));
         });
 
@@ -210,7 +232,7 @@ pub fn spawn_sync_bridge(
                         SyncCommand::CreateList { title } => {
                             if let Ok((new_doc, new_ticket, new_id)) = node.create_list_with_meta(&title, &author_name).await {
                                 active_doc = new_doc;
-                                                                active_ns_id = new_id;
+                                active_ns_id = new_id;
                                 events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                 let lid = ns_to_list_id(&active_ns_id);
@@ -239,7 +261,7 @@ pub fn spawn_sync_bridge(
                                 if let Ok(Some(d)) = node.open_list(ns_id).await {
                                     active_doc = d;
                                     active_ns_id = ns_id;
-                                                                        events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
+                                    events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                     let lid = ns_to_list_id(&active_ns_id);
                                     current_proj = load_projection(&node, &active_doc, lid).await.unwrap_or_else(|_| ListProjection::new(lid));
@@ -273,7 +295,7 @@ pub fn spawn_sync_bridge(
                                         if let Ok(Some(d)) = node.open_list(*first_id).await {
                                             active_doc = d;
                                             active_ns_id = *first_id;
-                                                                                        let lid = ns_to_list_id(&active_ns_id);
+                                            let lid = ns_to_list_id(&active_ns_id);
                                             current_proj = load_projection(&node, &active_doc, lid).await.unwrap_or_else(|_| ListProjection::new(lid));
                                         }
                                     }
@@ -296,7 +318,7 @@ pub fn spawn_sync_bridge(
                             if let Ok(ns_id) = NamespaceId::from_str(&id) {
                                 if let Ok((new_doc, new_ticket, new_id)) = node.rotate_list(ns_id, &author_name).await {
                                     active_doc = new_doc;
-                                                                        active_ns_id = new_id;
+                                    active_ns_id = new_id;
                                     events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                     let lid = ns_to_list_id(&active_ns_id);
@@ -349,13 +371,19 @@ pub fn spawn_sync_bridge(
                                         let _ = node.set_entry(&active_doc, DocKey::item_pos(item_id).to_key_bytes(), pos_bytes).await;
                                     }
 
+                                    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                                    history.record_item(&parsed.name, data.category.as_deref(), data.quantity, data.unit.as_deref(), now);
+                                    let _ = history.save_to_path(&history_path);
+
                                     let lid = ns_to_list_id(&active_ns_id);
                                     if let Ok(p) = load_projection(&node, &active_doc, lid).await {
                                         current_proj = p;
                                         let items = projection_to_slint_items(&current_proj);
+                                        let suggestions = get_suggestions(&current_proj, &history);
                                         let lists = load_lists_info(&node).await;
                                         let _ = app_weak.upgrade_in_event_loop(move |app| {
                                             app.set_items(ModelRc::new(VecModel::from(items)));
+                                            app.set_frequent_suggestions(ModelRc::new(VecModel::from(suggestions)));
                                             app.set_lists(ModelRc::new(VecModel::from(lists)));
                                         });
                                     }
@@ -437,7 +465,7 @@ pub fn spawn_sync_bridge(
                             if let Ok((doc, ticket)) = node.import_list_str(&ticket_str).await {
                                 active_doc = doc;
                                 active_ns_id = active_doc.id();
-                                                                events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
+                                events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 
                                 let lid = ns_to_list_id(&active_ns_id);
                                 current_proj = load_projection(&node, &active_doc, lid).await.unwrap_or_else(|_| ListProjection::new(lid));
@@ -464,6 +492,88 @@ pub fn spawn_sync_bridge(
                         SyncCommand::PruneTombstones => {
                             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                             current_proj.prune_tombstones(now);
+                        }
+
+                        SyncCommand::ExportActiveListMarkdown => {
+                            let meta = node.get_list_meta(&active_doc).await.ok().flatten();
+                            let created_by = meta.as_ref().map(|m| m.created_by.clone()).unwrap_or_default();
+                            let created_at = meta.as_ref().map(|m| m.created_at).unwrap_or(0);
+                            let export_list = ExportList::new(
+                                current_proj.title().to_string(),
+                                created_by,
+                                created_at,
+                                current_proj
+                                    .sorted_items()
+                                    .into_iter()
+                                    .map(|i| ExportItem {
+                                        id: i.id,
+                                        name: i.name().to_string(),
+                                        quantity: i.data.quantity,
+                                        unit: i.data.unit.clone(),
+                                        category: i.data.category.clone(),
+                                        note: i.data.note.clone(),
+                                        checked: i.is_checked(),
+                                        position: i.position.to_string(),
+                                        photo_hash: i.data.photo_hash_hex(),
+                                    })
+                                    .collect(),
+                            );
+                            let md = export_list.to_markdown();
+                            let exports_dir = storage_dir.join("exports");
+                            let _ = std::fs::create_dir_all(&exports_dir);
+                            let safe_title = current_proj.title().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+                            let filename = format!("{}.md", safe_title);
+                            let target_path = exports_dir.join(&filename);
+                            let status_msg = match std::fs::write(&target_path, md) {
+                                Ok(()) => format!("Exported to exports/{}", filename),
+                                Err(e) => format!("Export failed: {}", e),
+                            };
+                            let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                app.set_export_status_message(status_msg.into());
+                                app.set_show_export_status(true);
+                            });
+                        }
+
+                        SyncCommand::ExportActiveListJson => {
+                            let meta = node.get_list_meta(&active_doc).await.ok().flatten();
+                            let created_by = meta.as_ref().map(|m| m.created_by.clone()).unwrap_or_default();
+                            let created_at = meta.as_ref().map(|m| m.created_at).unwrap_or(0);
+                            let export_list = ExportList::new(
+                                current_proj.title().to_string(),
+                                created_by,
+                                created_at,
+                                current_proj
+                                    .sorted_items()
+                                    .into_iter()
+                                    .map(|i| ExportItem {
+                                        id: i.id,
+                                        name: i.name().to_string(),
+                                        quantity: i.data.quantity,
+                                        unit: i.data.unit.clone(),
+                                        category: i.data.category.clone(),
+                                        note: i.data.note.clone(),
+                                        checked: i.is_checked(),
+                                        position: i.position.to_string(),
+                                        photo_hash: i.data.photo_hash_hex(),
+                                    })
+                                    .collect(),
+                            );
+                            let safe_title = current_proj.title().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+                            let filename = format!("{}.json", safe_title);
+                            let exports_dir = storage_dir.join("exports");
+                            let _ = std::fs::create_dir_all(&exports_dir);
+                            let target_path = exports_dir.join(&filename);
+                            let status_msg = match export_list.to_json_pretty() {
+                                Ok(json) => match std::fs::write(&target_path, json) {
+                                    Ok(()) => format!("Backup saved to exports/{}", filename),
+                                    Err(e) => format!("Backup write failed: {}", e),
+                                },
+                                Err(e) => format!("JSON encode failed: {}", e),
+                            };
+                            let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                app.set_export_status_message(status_msg.into());
+                                app.set_show_export_status(true);
+                            });
                         }
                     }
                 }

@@ -25,6 +25,8 @@ export component AppWindow inherits Window {
     in-out property <string> qr_ascii: "";
     in-out property <bool> show_undo_toast: false;
     in-out property <string> undo_toast_message: "";
+    in-out property <bool> show_export_status: false;
+    in-out property <string> export_status_message: "";
 
     // Device / Network state
     in-out property <string> author_id: "author-local";
@@ -35,6 +37,7 @@ export component AppWindow inherits Window {
     // Data models
     in property <[GroceryListInfo]> lists: [];
     in-out property <[GroceryItemData]> items: [];
+    in property <[string]> frequent_suggestions: [];
 
     // Callbacks to Rust runtime
     callback select_list(string /* id */, string /* title */);
@@ -49,6 +52,8 @@ export component AppWindow inherits Window {
     callback copy_ticket();
     callback join_ticket(string /* ticket */);
     callback prune_tombstones();
+    callback export_active_list();
+    callback export_json_backup();
 
     VerticalLayout {
         padding: 0px;
@@ -159,6 +164,7 @@ export component AppWindow inherits Window {
                 dark_mode: root.dark_mode;
                 list_title: root.active_list_title;
                 items: root.items;
+                frequent_suggestions: root.frequent_suggestions;
                 show_undo_toast: root.show_undo_toast;
                 undo_toast_message: root.undo_toast_message;
                 toggle_item_check(id) => { root.toggle_item_check(id); }
@@ -192,8 +198,12 @@ export component AppWindow inherits Window {
                 node_id: root.node_id;
                 peer_count: root.peer_count;
                 relay_status: root.relay_status;
+                show_export_status: root.show_export_status;
+                export_status_message: root.export_status_message;
                 toggle_dark_mode() => { root.dark_mode = !root.dark_mode; }
                 prune_tombstones() => { root.prune_tombstones(); }
+                export_active_list() => { root.export_active_list(); }
+                export_json_backup() => { root.export_json_backup(); }
             }
         }
 
