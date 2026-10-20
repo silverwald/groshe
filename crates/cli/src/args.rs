@@ -101,28 +101,28 @@ pub enum Commands {
         list: Option<String>,
     },
 
-    /// Manually adjust an item's fractional position ordering
+    /// Reorder an item in the list
     Pos {
-        /// Item ID to move
+        /// Item ID or unique UUID prefix
         item: String,
-        /// Move immediately before this item ID
-        #[arg(long)]
+        /// Place item immediately before this item ID
+        #[arg(long, conflicts_with_all = &["after", "top", "bottom"])]
         before: Option<String>,
-        /// Move immediately after this item ID
-        #[arg(long)]
+        /// Place item immediately after this item ID
+        #[arg(long, conflicts_with_all = &["before", "top", "bottom"])]
         after: Option<String>,
-        /// Move to the very top of the list
-        #[arg(long)]
+        /// Move item to the very top of the list
+        #[arg(long, conflicts_with_all = &["before", "after", "bottom"])]
         top: bool,
-        /// Move to the very bottom of the list
-        #[arg(long)]
+        /// Move item to the very bottom of the list
+        #[arg(long, conflicts_with_all = &["before", "after", "top"])]
         bottom: bool,
         /// Target list ID or prefix
         #[arg(short, long)]
         list: Option<String>,
     },
 
-    /// Remove an item (applies CRDT tombstone)
+    /// Remove an item from a list (tombstone)
     Rm {
         /// Item ID or unique UUID prefix
         item: String,
@@ -210,6 +210,9 @@ pub enum Commands {
         /// Optional DocTicket to join and keep synced
         #[arg(short, long)]
         ticket: Option<String>,
+        /// Host the Web Companion on the specified address (defaults to 127.0.0.1:8080 if passed without value)
+        #[arg(long, num_args = 0..=1, default_missing_value = "127.0.0.1:8080")]
+        web: Option<String>,
     },
 }
 

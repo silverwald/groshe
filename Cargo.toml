@@ -6,6 +6,7 @@ members = [
     "crates/store",
     "crates/cli",
     "apps/android",
+    "apps/web",
 ]
 
 [workspace.package]
@@ -20,6 +21,7 @@ repository = "https://github.com/groshe/groshe"
 groshe-core = { path = "crates/core" }
 groshe-sync = { path = "crates/sync" }
 groshe-store = { path = "crates/store" }
+groshe-web = { path = "apps/web" }
 
 # Common utilities & serialization
 serde = { version = "1.0", default-features = false, features = ["derive"] }
@@ -48,5 +50,3 @@ qrcode = { version = "0.14", default-features = false }
 [profile.release]
 opt-level = 3
 lto = "thin"
-codegen-units = 1
-strip = true

@@ -1016,7 +1016,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             node.shutdown().await?;
         }
 
-        Commands::Serve { ticket: ticket_opt } => {
+        Commands::Serve {
+            ticket: ticket_opt,
+            web: web_opt,
+        } => {
             println!("Starting Groshe serve daemon (always-on peer)...");
             println!("Data directory: {}", data_dir.display());
             let node = GrosheSyncNode::persistent(&data_dir).await?;
@@ -1038,6 +1041,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Active synced documents: {} document(s) on-disk.",
                 local_ids.len()
             );
+
+            let node_arc = std::sync::Arc::new(node.clone());
+            let _web_handle = if let Some(bind_str) = web_opt {
+                let bind_addr: std::net::SocketAddr = bind_str.parse().map_err(|e| {
+                    format!("Invalid --web bind address '{bind_str}': {e}")
+                })?;
+                println!("Web Companion:    http://{}", bind_addr);
+                let node_for_web = node_arc.clone();
+                Some(tokio::spawn(async move {
+                    if let Err(e) = groshe_web::start_web_companion(node_for_web, bind_addr).await {
+                        tracing::error!("Web companion error: {}", e);
+                    }
+                }))
+            } else {
+                None
+            };
 
             println!("Groshe daemon active. Listening for sync requests (Ctrl+C to quit)...");
             tokio::signal::ctrl_c().await?;

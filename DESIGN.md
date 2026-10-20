@@ -1,6 +1,6 @@
 # Shared Grocery List App — Design Doc
 
-- **Status:** Scoped, not yet being built
+- **Status:** Phase 1, 2, 4, and 5 complete; proceeding to Phase 3 (iOS)
 - **Date:** 2026-10-14
 - **Platform priority:** Android (primary), iOS, CLI (full peer), Web (companion)
 - **Language goal:** As close to pure Rust as practical across all platforms
@@ -261,7 +261,7 @@ Existing per-list documents are not merged or rewritten.
   so rust-analyzer works.
 - **Time box:** 2 days of effort, hard stop. Stop early if per-crate fixups
   beyond core's small dep set are needed, or if Buck2 dependency versions
-  would have to diverge from `Cargo.lock`.
+  would have to diverge from `Cargo.lock` .
 - **Non-gating:** separate, non-required CI job. A failing Buck2 job never
   blocks a merge or release.
 - **Exit criteria:** clean-checkout build + tests pass, incremental rebuild
@@ -372,6 +372,9 @@ appears.
 
 ## Changelog
 
+- 2026-10-18 — Phase 4 completed: Web companion (`apps/web`) with Axum REST API, WebSocket live subscription streaming, responsive Material 3 single-page web app, and `grocery serve --web` integration. All 47 workspace tests pass.
+- 2026-10-18 — Phase 5 completed: Hardening & extras (frequent-item suggestions with recency decay scoring, full JSON backup & Markdown export/import, item photo attachments via iroh-blobs with 256KB cap, configurable self-hosted relay support in `groshe.toml` with setup documentation).
+- 2026-10-17 — Phase 2 completed: Android MVP with Slint UI architecture (lists, detail, in-store, add, settings), reactive sync bridge, quick-add parser, Android JNI haptic feedback, release packaging, and emulator automation.
 - 2026-10-16 — Phase 1 completed: Core domain engine (CBOR serialization, fractional position ordering), Reactive projection store (LWW conflict resolution, tombstone retention, event broadcasting), Iroh sync engine (identity persistence, doc tickets, QR codes, gossip presence, list rotation), full-peer CLI binary (`grocery`), CRDT property testing suite (`proptest`), and 3-peer convergence integration verification. Ready for Phase 2 (Android MVP).
 - 2026-10-15 — Spike 0.4 completed on `crates/core`. Buck2 build, test, and `rust-project.json` generation verified. Performance (Cargo 455ms vs Buck2 885ms incremental) and Windows Developer Mode symlink friction evaluated. Decision: **DELETE** (all BUCK files removed; no zombie build system). Cargo remains canonical.
 - 2026-10-14 — Initial version. Decisions recorded: no GPUI; Slint UI;
