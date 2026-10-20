@@ -18,7 +18,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use config::GrosheConfig;
-pub use identity::DeviceIdentity;
+pub use identity::{
+    DeviceIdentity, FileIdentityStorage, IdentityStorage, KeychainIdentityStorage,
+    KEYCHAIN_AUTHOR_ID_ACCOUNT, KEYCHAIN_DEFAULT_SERVICE, KEYCHAIN_SECRET_KEY_ACCOUNT,
+};
 pub use presence::{derive_presence_topic, PresencePayload};
 pub use qr::render_qr_terminal;
 
@@ -130,13 +133,20 @@ impl GrosheSyncNode {
     /// Create a persistent sync node stored in `data_dir`.
     pub async fn persistent(data_dir: impl AsRef<Path>) -> Result<Self, SyncError> {
         let dir = data_dir.as_ref();
+        let identity = DeviceIdentity::load_or_create(dir).await?;
+        Self::persistent_with_identity(dir, identity).await
+    }
+
+    /// Create a persistent sync node stored in `data_dir` with a custom [DeviceIdentity].
+    pub async fn persistent_with_identity(
+        data_dir: impl AsRef<Path>,
+        mut identity: DeviceIdentity,
+    ) -> Result<Self, SyncError> {
+        let dir = data_dir.as_ref();
         tokio::fs::create_dir_all(dir).await?;
 
         // Load or create configuration (groshe.toml)
         let config = GrosheConfig::load_or_create(dir).await?;
-
-        // Load or create persistent cryptographic identity
-        let mut identity = DeviceIdentity::load_or_create(dir).await?;
 
         let relay_mode = if config.is_relay_disabled() {
             RelayMode::Disabled
@@ -710,5 +720,17 @@ relay_url = "disabled"
         // Verify ticket can render QR code
         let qr = node.render_ticket_qr(&new_ticket).unwrap();
         assert!(!qr.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_persistent_node_with_keychain_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let storage = Arc::new(KeychainIdentityStorage::new("test.service"));
+        let identity = DeviceIdentity::load_or_create_with_storage(storage).await.unwrap();
+
+        let node = GrosheSyncNode::persistent_with_identity(tmp.path(), identity).await.unwrap();
+        let (doc, ticket) = node.create_list().await.unwrap();
+        assert_eq!(ticket.capability.id(), doc.id());
+        node.shutdown().await.unwrap();
     }
 }
