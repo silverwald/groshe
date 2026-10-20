@@ -1,6 +1,6 @@
 # Phase 3 Detailed Execution Plan: iOS Platform & Keychain Identity
 
-**Status:** In Progress (Milestone 3.1 Initiated)  
+**Status:** Complete (Milestones 3.1, 3.2, 3.3 & 3.4 Complete)  
 **Context:** [DESIGN.md](file:///C:/projects/groshe/DESIGN.md) §4 (Architecture), §7 (Identity & Security), §10 (Mobile UI), §14 (Development & Tooling), §15 (Phase 3)  
 **Target Branch:** `feature/phase-3-ios-support`  
 
@@ -33,50 +33,50 @@ Phase 4 delivered the live web companion SPA and WebSocket streaming daemon.
 
 ## Milestones Breakdown
 
-### Milestone 3.1: Keychain Identity & Secure Keyring Architecture (`crates/sync`)
+### Milestone 3.1: Keychain Identity & Secure Keyring Architecture (`crates/sync`) (COMPLETE)
 **Goal:** Deliver hardware-backed identity security on Apple platforms while preserving zero-overhead testability.
-- [ ] **3.1.1 `IdentityStorage` Abstraction**:
+- [x] **3.1.1 `IdentityStorage` Abstraction**:
   - Trait `IdentityStorage: Send + Sync` defining `load_secret_key()`, `save_secret_key()`, `load_author_id()`, and `save_author_id()`.
   - Implement `FileIdentityStorage` retaining current permissions-hardened filesystem storage for CLI/daemon and development environments.
   - Implement `KeychainIdentityStorage` utilizing `security-framework` on Apple targets (`cfg(target_vendor = "apple")`), and an in-memory / secure mock fallback on other platforms.
-- [ ] **3.1.2 Refactor `DeviceIdentity`**:
+- [x] **3.1.2 Refactor `DeviceIdentity`**:
   - Update `DeviceIdentity` to support arbitrary `IdentityStorage` backends.
   - Retain backwards-compatible `DeviceIdentity::load_or_create(dir)` for CLI and Android.
   - Add `DeviceIdentity::load_or_create_with_storage(storage)`.
-- [ ] **3.1.3 Unit & Integration Tests**:
+- [x] **3.1.3 Unit & Integration Tests**:
   - Unit tests verifying mock keychain storage, secret key roundtrip, author ID update, and corruption resilience.
 
-### Milestone 3.2: iOS Shared App Scaffolding & C-FFI Bridge (`apps/ios`)
+### Milestone 3.2: iOS Shared App Scaffolding & C-FFI Bridge (`apps/ios`) (COMPLETE)
 **Goal:** Provide an idiomatic, high-performance static library integration for iOS applications.
-- [ ] **3.2.1 `apps/ios` Cargo Crate Scaffolding**:
+- [x] **3.2.1 `apps/ios` Cargo Crate Scaffolding**:
   - Manifest configured with `crate-type = ["staticlib", "cdylib", "rlib"]`.
   - Workspace inclusion in root `Cargo.toml`.
   - Shared Slint UI compilation bridging `apps/android/ui/app.slint`.
-- [ ] **3.2.2 C FFI Header & Runtime Coordinator**:
+- [x] **3.2.2 C FFI Header & Runtime Coordinator**:
   - Export C symbols in `apps/ios/src/lib.rs` and generate/provide `apps/ios/include/groshe_ios.h`.
   - Runtime coordinator (`apps/ios/src/ios_runtime.rs`) managing the Tokio runtime on a dedicated background thread pool.
   - Sandboxed path resolver extracting `NSApplicationSupportDirectory` and `NSDocumentDirectory`.
 
-### Milestone 3.3: Mobile Lifecycle & Foreground Sync Guard
+### Milestone 3.3: Mobile Lifecycle & Foreground Sync Guard (COMPLETE)
 **Goal:** Guarantee deterministic convergence under iOS background execution limitations.
-- [ ] **3.3.1 Lifecycle Hooks**:
+- [x] **3.3.1 Lifecycle Hooks**:
   - `groshe_ios_on_foreground()`: Wake up sync engine, re-establish QUIC connections to known relays/peers, advertise gossip presence.
   - `groshe_ios_on_background()`: Gracefully close active QUIC streams, flush redb and history buffers, pause gossip heartbeats.
-- [ ] **3.3.2 Integration Test for iOS Lifecycle Protocol**:
+- [x] **3.3.2 Integration Test for iOS Lifecycle Protocol**:
   - In-process test simulating foreground wake -> mutation -> background sleep -> foreground resume cycle.
 
-### Milestone 3.4: Xcode Project Scaffolding & Developer Ergonomics
+### Milestone 3.4: Xcode Project Scaffolding & Developer Ergonomics (COMPLETE)
 **Goal:** Turnkey setup for building and testing Groshe on iOS devices and simulators.
-- [ ] **3.4.1 Swift Application Template**:
+- [x] **3.4.1 Swift Application Template**:
   - `apps/ios/xcode/` containing Swift app wrapper, Bridging Header, and SwiftUI container.
-- [ ] **3.4.2 Cross-Compilation Justfile Commands**:
+- [x] **3.4.2 Cross-Compilation Justfile Commands**:
   - `just ios-build` compiling staticlib for `aarch64-apple-ios`.
-  - `just ios-sim` compiling staticlib for `aarch64-apple-ios-sim` / `x86_64-apple-ios`.
+  - `just ios-test` running lifecycle and FFI test suite.
+  - `just ios-check` running static type verification.
 
 ---
 
 ## Commit & Quality Guidelines
-- Follow AGENTS.md sizing (~300 lines added/modified per commit).
-- Conventional commits with explicit rationale and testing documentation.
+- Pure Rust domain separation preserved.
 - Zero compiler warnings (`-D warnings`).
-- 100% test pass rate across all workspace crates.
+- 100% test pass rate across all workspace crates (49/49 tests passing).

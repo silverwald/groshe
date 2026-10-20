@@ -2385,6 +2385,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "groshe-ios"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "groshe-core",
+ "groshe-store",
+ "groshe-sync",
+ "slint",
+ "slint-build",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "groshe-store"
 version = "0.1.0"
 dependencies = [

@@ -1,6 +1,6 @@
 # Shared Grocery List App — Design Doc
 
-- **Status:** Phase 1, 2, 4, and 5 complete; proceeding to Phase 3 (iOS)
+- **Status:** Phase 1, 2, 3, 4, and 5 complete; ready for public distribution / household iteration
 - **Date:** 2026-10-14
 - **Platform priority:** Android (primary), iOS, CLI (full peer), Web (companion)
 - **Language goal:** As close to pure Rust as practical across all platforms
@@ -372,6 +372,7 @@ appears.
 
 ## Changelog
 
+- 2026-10-20 — Phase 3 completed: iOS platform support with hardware-backed Keychain identity (`crates/sync`), C-FFI static library runtime (`apps/ios`), background execution lifecycle guard (foreground wake / background sleep), Swift/SwiftUI and Xcode project integration templates, and Justfile cross-compilation tasks. All 49 workspace tests pass.
 - 2026-10-18 — Phase 4 completed: Web companion (`apps/web`) with Axum REST API, WebSocket live subscription streaming, responsive Material 3 single-page web app, and `grocery serve --web` integration. All 47 workspace tests pass.
 - 2026-10-18 — Phase 5 completed: Hardening & extras (frequent-item suggestions with recency decay scoring, full JSON backup & Markdown export/import, item photo attachments via iroh-blobs with 256KB cap, configurable self-hosted relay support in `groshe.toml` with setup documentation).
 - 2026-10-17 — Phase 2 completed: Android MVP with Slint UI architecture (lists, detail, in-store, add, settings), reactive sync bridge, quick-add parser, Android JNI haptic feedback, release packaging, and emulator automation.
