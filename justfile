@@ -91,3 +91,15 @@ android-run-emulator AVD="medium_phone" PROFILE="release":
     if (-not (& "{{ sdk_dir }}/platform-tools/adb.exe" devices | Select-String "emulator")) { Write-Host "Starting emulator {{ AVD }}..." -ForegroundColor Cyan; Start-Process -FilePath "{{ sdk_dir }}/emulator/emulator.exe" -ArgumentList "-avd", "{{ AVD }}" }
     just emulator-wait
     just android-run TARGET="x86_64" PROFILE="{{ PROFILE }}"
+
+# Check iOS native staticlib crate
+ios-check:
+    cargo check -p groshe-ios
+
+# Run iOS unit and lifecycle tests
+ios-test:
+    cargo test -p groshe-ios
+
+# Build iOS static library for device or simulator
+ios-build TARGET="aarch64-apple-ios" PROFILE="debug":
+    cargo build -p groshe-ios --target {{ TARGET }} {{ if PROFILE == "release" { "--release" } else { "" } }}

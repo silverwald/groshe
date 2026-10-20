@@ -1,0 +1,27 @@
+[package]
+name = "groshe-ios"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "iOS mobile app entry point and native C-FFI runtime for Groshe"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+groshe-core = { workspace = true }
+groshe-sync = { workspace = true }
+groshe-store = { workspace = true }
+slint = { workspace = true }
+futures-util = "0.3"
+tokio = { workspace = true }
+tracing.workspace = true
+uuid = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"
