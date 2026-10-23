@@ -29,5 +29,12 @@ security-framework = "3.0"
 
 [dev-dependencies]
 groshe-store = { workspace = true }
+groshe-web = { workspace = true }
+serde_json = { workspace = true }
+axum = { version = "0.7", features = ["ws"] }
+base64 = "0.22"
+http-body-util = "0.1"
+tokio-tungstenite = "0.24"
+tower = { version = "0.4", features = ["util"] }
 rand = "0.10"
 tempfile = "3.17"
