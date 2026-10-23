@@ -1,0 +1,52 @@
+[graph]
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-linux-android",
+    "aarch64-apple-ios",
+]
+all-features = false
+no-default-features = false
+
+[advisories]
+version = 2
+unmaintained = "none"
+yanked = "warn"
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "0BSD",
+    "Zlib",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    "MIT-0",
+    "LicenseRef-Slint-Royalty-free-2.0",
+    "GPL-3.0-only",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow-workspace = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

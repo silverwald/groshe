@@ -15,7 +15,7 @@ export ANDROID_NDK_ROOT := env("ANDROID_NDK_ROOT", sdk_dir + "/ndk/android-ndk-r
 export ANDROID_JAR := env("ANDROID_JAR", sdk_dir + "/platforms/android-34/android.jar")
 export JAVA_HOME := env("JAVA_HOME", jdk_dir)
 
-default: check test
+default: check test audit
 
 # Validate and configure the Windows development environment (Rust, MSRV, NDK, Java, Android SDK)
 bootstrap:
@@ -28,6 +28,10 @@ check:
 # Run all workspace unit and integration tests
 test:
     cargo test --workspace
+
+# Audit licenses, security advisories, bans, and sources with cargo-deny
+audit:
+    cargo deny check
 
 # Build all workspace binaries and libraries
 build:
