@@ -46,6 +46,14 @@ pub fn setup_app_window(app: &AppWindow, sync_handle: sync_bridge::SyncBridgeHan
     });
 
     let sh = sync_handle.clone();
+    app.on_edit_item(move |id, raw_input| {
+        sh.send(sync_bridge::SyncCommand::EditItem {
+            id: id.to_string(),
+            raw_input: raw_input.to_string(),
+        });
+    });
+
+    let sh = sync_handle.clone();
     app.on_add_item(move |raw_input| {
         sh.send(sync_bridge::SyncCommand::AddItem {
             raw_input: raw_input.to_string(),

@@ -49,6 +49,31 @@ pub struct AddItemRequest {
     pub photo_base64: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateItemRequest {
+    /// Optional updated item name
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Optional updated quantity
+    #[serde(default)]
+    pub quantity: Option<f64>,
+    /// Optional updated unit
+    #[serde(default)]
+    pub unit: Option<String>,
+    /// Optional updated category override
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Optional updated note
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Optional raw input for quick-add re-parsing
+    #[serde(default)]
+    pub raw_input: Option<String>,
+    /// Optional updated base64-encoded thumbnail photo
+    #[serde(default)]
+    pub photo_base64: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToggleCheckRequest {
     pub checked: bool,

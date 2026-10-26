@@ -1,4 +1,4 @@
-﻿import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme, GroceryItemData } from "theme.slint";
 
 export component DetailScreen inherits Rectangle {
@@ -11,7 +11,12 @@ export component DetailScreen inherits Rectangle {
     in-out property <string> suggested_category: "General";
     in property <[string]> frequent_suggestions: [];
 
+    in-out property <bool> editing_modal_open: false;
+    in-out property <string> editing_item_id: "";
+    in-out property <string> editing_item_input: "";
+
     callback toggle_item_check(string /* id */);
+    callback edit_item(string /* id */, string /* raw_input */);
     callback delete_item(string /* id */);
     callback add_item(string /* raw_input */);
     callback trigger_undo();
@@ -172,23 +177,53 @@ export component DetailScreen inherits Rectangle {
                             }
                         }
 
-                        // Delete button
-                        Rectangle {
-                            width: Theme.min_touch_target;
-                            height: Theme.min_touch_target;
+                        // Actions: Edit & Delete
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: end;
 
-                            TouchArea {
-                                accessible_role: button;
-                                accessible_label: "Delete " + item.name;
-                                clicked => { root.delete_item(item.id); }
+                            // Edit button
+                            Rectangle {
+                                width: Theme.min_touch_target;
+                                height: Theme.min_touch_target;
+
+                                TouchArea {
+                                    accessible_role: button;
+                                    accessible_label: "Edit " + item.name;
+                                    clicked => {
+                                        root.editing_item_id = item.id;
+                                        root.editing_item_input = item.quantity != "" ? (item.quantity + (item.unit != "" ? " " + item.unit : "") + " " + item.name) : item.name;
+                                        root.editing_modal_open = true;
+                                    }
+                                }
+
+                                Text {
+                                    text: "✎";
+                                    font_size: 16px;
+                                    color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                                    horizontal_alignment: center;
+                                    vertical_alignment: center;
+                                }
                             }
 
-                            Text {
-                                text: "✕";
-                                font_size: 15px;
-                                color: Theme.error;
-                                horizontal_alignment: center;
-                                vertical_alignment: center;
+                            // Delete button
+                            Rectangle {
+                                width: Theme.min_touch_target;
+                                height: Theme.min_touch_target;
+
+                                TouchArea {
+                                    accessible_role: button;
+                                    accessible_label: "Delete " + item.name;
+                                    clicked => { root.delete_item(item.id); }
+                                }
+
+                                Text {
+                                    text: "✕";
+                                    font_size: 15px;
+                                    color: Theme.error;
+                                    horizontal_alignment: center;
+                                    vertical_alignment: center;
+                                }
                             }
                         }
                     }
@@ -311,6 +346,71 @@ export component DetailScreen inherits Rectangle {
                     clicked => {
                         root.add_item(root.new_item_input);
                         root.new_item_input = "";
+                    }
+                }
+            }
+        }
+    }
+
+    // In-place Item Edit Dialog
+    if root.editing_modal_open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000088;
+
+        TouchArea {
+            // Modal backdrop
+        }
+
+        Rectangle {
+            width: 320px;
+            height: 170px;
+            border_radius: 12px;
+            background: dark_mode ? Theme.dark_surface_card : Theme.light_surface;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+                alignment: space_between;
+
+                Text {
+                    text: "Edit Item";
+                    font_size: 16px;
+                    font_weight: 700;
+                    color: dark_mode ? Theme.dark_text : Theme.light_text;
+                }
+
+                edit_input := LineEdit {
+                    text: root.editing_item_input;
+                    placeholder_text: "e.g. 2 lbs apples, milk 1 gal";
+                    edited(val) => { root.editing_item_input = val; }
+                    accepted => {
+                        if (root.editing_item_input != "") {
+                            root.edit_item(root.editing_item_id, root.editing_item_input);
+                            root.editing_modal_open = false;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+
+                    Button {
+                        text: "Cancel";
+                        clicked => { root.editing_modal_open = false; }
+                    }
+
+                    Button {
+                        text: "Save";
+                        primary: true;
+                        enabled: root.editing_item_input != "";
+                        clicked => {
+                            root.edit_item(root.editing_item_id, root.editing_item_input);
+                            root.editing_modal_open = false;
+                        }
                     }
                 }
             }
