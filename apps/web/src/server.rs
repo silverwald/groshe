@@ -7,12 +7,14 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use groshe_core::{
-    model::{ItemCheck, ItemData, ItemId, ListId}, position::ItemPosition,
+    from_cbor,
+    model::{ItemCheck, ItemData, ItemId, ListId},
+    position::ItemPosition,
     to_cbor, DocKey,
 };
 use groshe_store::ListProjection;
@@ -21,7 +23,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::api::{AddItemRequest, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto, ToggleCheckRequest};
+use crate::api::{
+    AddItemRequest, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto, ToggleCheckRequest,
+    UpdateItemRequest,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -79,6 +84,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/lists", get(get_lists))
         .route("/api/lists/:id", get(get_list))
         .route("/api/lists/:id/items", post(add_item))
+        .route("/api/lists/:id/items/:item_id", patch(update_item))
         .route("/api/lists/:id/check/:item_id", post(toggle_check))
         .route("/api/lists/:id/items/:item_id", delete(delete_item))
         .route("/api/photos/:hash", get(get_photo))
@@ -216,7 +222,6 @@ async fn add_item(
     if let Some(c) = req.category.or(parsed.category) {
         item_data = item_data.with_category(c);
     }
-    
 
     if let Some(ref b64) = req.photo_base64 {
         use base64::Engine;
@@ -288,13 +293,117 @@ async fn add_item(
     Ok((StatusCode::CREATED, Json(created_dto)))
 }
 
+async fn update_item(
+    State(state): State<AppState>,
+    Path((id_str, item_id_str)): Path<(String, String)>,
+    Json(req): Json<UpdateItemRequest>,
+) -> Result<Json<ItemDto>, AppError> {
+    let ns_id = NamespaceId::from_str(&id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let item_id =
+        ItemId::from_str(&item_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let doc = state
+        .node
+        .open_list(ns_id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("List '{id_str}' not found")))?;
+
+    let data_key = DocKey::item_data(item_id).to_key_bytes();
+    let current_bytes = state
+        .node
+        .get_entry(&doc, &data_key)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("Item '{item_id_str}' not found")))?;
+
+    let mut current_data: ItemData =
+        from_cbor(&current_bytes).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    if let Some(ref raw) = req.raw_input {
+        let parsed = groshe_core::parser::parse_quick_add(raw);
+        if !parsed.name.trim().is_empty() {
+            current_data.name = parsed.name;
+        }
+        if let Some(q) = parsed.quantity {
+            current_data.quantity = Some(q);
+            current_data.unit = parsed.unit;
+        }
+        if let Some(c) = parsed.category {
+            current_data.category = Some(c);
+        }
+    }
+
+    if let Some(n) = req.name {
+        if !n.trim().is_empty() {
+            current_data.name = n.trim().to_string();
+        }
+    }
+    if let Some(q) = req.quantity {
+        current_data.quantity = Some(q);
+    }
+    if let Some(u) = req.unit {
+        current_data.unit = Some(u);
+    }
+    if let Some(c) = req.category {
+        current_data.category = Some(c);
+    }
+    if let Some(nt) = req.note {
+        current_data.note = Some(nt);
+    }
+
+    if let Some(ref b64) = req.photo_base64 {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64.trim())
+            .map_err(|e| AppError::BadRequest(format!("Invalid base64 photo data: {e}")))?;
+        let hash = state
+            .node
+            .add_photo_blob(&bytes)
+            .await
+            .map_err(|e| AppError::BadRequest(e.to_string()))?;
+        current_data = current_data.with_photo_hash(hash);
+    }
+
+    state
+        .node
+        .set_entry(
+            &doc,
+            &data_key,
+            to_cbor(&current_data).map_err(|e| AppError::Internal(e.to_string()))?,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let lid = ns_to_list_id(&ns_id);
+    let proj = load_projection(&state.node, &doc, lid).await?;
+    let updated_item = proj.get_item(&item_id).ok_or_else(|| {
+        AppError::NotFound(format!("Item '{item_id_str}' not found in projection"))
+    })?;
+
+    Ok(Json(ItemDto {
+        id: item_id.to_string(),
+        name: updated_item.data.name.clone(),
+        quantity: updated_item.data.quantity,
+        unit: updated_item.data.unit.clone(),
+        category: updated_item.data.category.clone(),
+        note: updated_item.data.note.clone(),
+        checked: updated_item.is_checked(),
+        position: updated_item.position.to_string(),
+        photo_hash: updated_item
+            .data
+            .photo_hash
+            .map(|h| h.iter().map(|b| format!("{:02x}", b)).collect()),
+    }))
+}
+
 async fn toggle_check(
     State(state): State<AppState>,
     Path((id_str, item_id_str)): Path<(String, String)>,
     Json(req): Json<ToggleCheckRequest>,
 ) -> Result<StatusCode, AppError> {
     let ns_id = NamespaceId::from_str(&id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let item_id = ItemId::from_str(&item_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let item_id =
+        ItemId::from_str(&item_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
     let doc = state
         .node
         .open_list(ns_id)
@@ -330,7 +439,8 @@ async fn delete_item(
     Path((id_str, item_id_str)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
     let ns_id = NamespaceId::from_str(&id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let item_id = ItemId::from_str(&item_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let item_id =
+        ItemId::from_str(&item_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
     let doc = state
         .node
         .open_list(ns_id)
@@ -393,12 +503,7 @@ async fn ws_handler(
     Ok(ws.on_upgrade(move |socket| handle_socket(socket, state.node, doc, ns_id)))
 }
 
-async fn handle_socket(
-    socket: WebSocket,
-    node: Arc<GrosheSyncNode>,
-    doc: Doc,
-    ns_id: NamespaceId,
-) {
+async fn handle_socket(socket: WebSocket, node: Arc<GrosheSyncNode>, doc: Doc, ns_id: NamespaceId) {
     let (mut sender, mut receiver) = socket.split();
 
     // 1. Send initial projection snapshot

@@ -193,18 +193,30 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
       border: 1px solid var(--border);
       cursor: pointer;
     }
-    .btn-delete {
+    .item-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-edit, .btn-delete {
       background: transparent;
       border: none;
-      color: var(--danger);
-      font-size: 1.25rem;
+      font-size: 1.1rem;
       cursor: pointer;
-      width: 36px;
-      height: 36px;
+      width: 32px;
+      height: 32px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+    .btn-edit {
+      color: var(--accent);
+    }
+    .btn-edit:hover { background: #1c2b3a; }
+    .btn-delete {
+      color: var(--danger);
+      font-size: 1.25rem;
     }
     .btn-delete:hover { background: #3a1515; }
     .empty-state {
@@ -359,14 +371,26 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         }
         left.appendChild(details);
 
+        const actions = document.createElement('div');
+        actions.className = 'item-actions';
+
+        const btnEdit = document.createElement('button');
+        btnEdit.className = 'btn-edit';
+        btnEdit.innerHTML = '&#9998;';
+        btnEdit.title = 'Edit item';
+        btnEdit.onclick = () => editItemPrompt(item);
+
         const btnDelete = document.createElement('button');
         btnDelete.className = 'btn-delete';
         btnDelete.innerHTML = '&times;';
         btnDelete.title = 'Delete item';
         btnDelete.onclick = () => deleteItem(item.id);
 
+        actions.appendChild(btnEdit);
+        actions.appendChild(btnDelete);
+
         card.appendChild(left);
-        card.appendChild(btnDelete);
+        card.appendChild(actions);
         container.appendChild(card);
       });
     }
@@ -390,21 +414,40 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
       }
     }
 
+    async function editItemPrompt(item) {
+      if (!activeListId) return;
+      const currentVal = (item.quantity ? item.quantity + (item.unit ? ' ' + item.unit : '') + ' ' : '') + item.name + (item.category ? ' @' + item.category : '');
+      const input = prompt('Edit item (quick-add format: e.g. 2 gal milk @dairy):', currentVal);
+      if (input === null) return;
+      const val = input.trim();
+      if (!val) return;
+      try {
+        await fetch(`/api/lists/${activeListId}/items/${item.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raw_input: val })
+        });
+        loadActiveList();
+      } catch (err) {
+        console.error('Failed to update item', err);
+      }
+    }
+
     async function toggleCheck(itemId, checked) {
       if (!activeListId) return;
       try {
         await fetch(`/api/lists/${activeListId}/check/${itemId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ checked })
+          body: JSON.stringify({ checked })\
         });
         loadActiveList();
-      } catch (err) {
+      } catch (err) {\
         console.error('Failed to toggle check', err);
       }
     }
 
-    async function deleteItem(itemId) {
+    async function deleteItem(itemId) {\
       if (!activeListId) return;
       try {
         await fetch(`/api/lists/${activeListId}/items/${itemId}`, { method: 'DELETE' });
