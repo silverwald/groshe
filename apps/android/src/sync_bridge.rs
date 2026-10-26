@@ -1,4 +1,4 @@
-﻿//! Reactive sync bridge connecting Slint UI with GrosheSyncNode and ReactiveStore.
+//! Reactive sync bridge connecting Slint UI with GrosheSyncNode and ReactiveStore.
 //!
 //! Handles background Iroh P2P synchronization, CRDT document mutations,
 //! multi-list management, live event streaming, and Slint view updates.
@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use groshe_core::{
-    parse_quick_add, to_cbor, DocKey, ExportItem, ExportList, ItemCheck, ItemData, ItemId,
+    from_cbor, parse_quick_add, to_cbor, DocKey, ExportItem, ExportList, ItemCheck, ItemData, ItemId,
     ItemPosition, ListId,
 };
 use groshe_store::{ItemHistoryTracker, ListProjection};
@@ -27,6 +27,7 @@ pub enum SyncCommand {
     DeleteList { id: String },
     RotateList { id: String },
     AddItem { raw_input: String },
+    EditItem { id: String, raw_input: String },
     ToggleItemCheck { id: String },
     DeleteItem { id: String },
     UndoDelete,
@@ -373,6 +374,52 @@ pub fn spawn_sync_bridge(
 
                                     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                                     history.record_item(&parsed.name, data.category.as_deref(), data.quantity, data.unit.as_deref(), now);
+                                    let _ = history.save_to_path(&history_path);
+
+                                    let lid = ns_to_list_id(&active_ns_id);
+                                    if let Ok(p) = load_projection(&node, &active_doc, lid).await {
+                                        current_proj = p;
+                                        let items = projection_to_slint_items(&current_proj);
+                                        let suggestions = get_suggestions(&current_proj, &history);
+                                        let lists = load_lists_info(&node).await;
+                                        let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                            app.set_items(ModelRc::new(VecModel::from(items)));
+                                            app.set_frequent_suggestions(ModelRc::new(VecModel::from(suggestions)));
+                                            app.set_lists(ModelRc::new(VecModel::from(lists)));
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        SyncCommand::EditItem { id, raw_input } => {
+                            if let Ok(item_id) = ItemId::from_str(&id) {
+                                let parsed = parse_quick_add(&raw_input);
+                                if !parsed.name.trim().is_empty() {
+                                    let data_key = DocKey::item_data(item_id).to_key_bytes();
+                                    let mut current_data = if let Ok(Some(bytes)) = node.get_entry(&active_doc, &data_key).await {
+                                        from_cbor::<ItemData>(&bytes).unwrap_or_else(|_| ItemData::new(&parsed.name).unwrap())
+                                    } else if let Some(existing) = current_proj.get_item(&item_id) {
+                                        existing.data.clone()
+                                    } else {
+                                        ItemData::new(&parsed.name).unwrap()
+                                    };
+
+                                    current_data.name = parsed.name.trim().to_string();
+                                    if let Some(q) = parsed.quantity {
+                                        current_data.quantity = Some(q);
+                                        current_data.unit = parsed.unit;
+                                    }
+                                    if let Some(c) = parsed.category {
+                                        current_data.category = Some(c);
+                                    }
+
+                                    if let Ok(data_bytes) = to_cbor(&current_data) {
+                                        let _ = node.set_entry(&active_doc, data_key, data_bytes).await;
+                                    }
+
+                                    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                                    history.record_item(&current_data.name, current_data.category.as_deref(), current_data.quantity, current_data.unit.as_deref(), now);
                                     let _ = history.save_to_path(&history_path);
 
                                     let lid = ns_to_list_id(&active_ns_id);

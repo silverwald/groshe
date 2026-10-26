@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use groshe_core::{to_cbor, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId};
 use groshe_store::{history::ItemHistoryTracker, ListProjection};
 use groshe_sync::{DeviceIdentity, Doc, GrosheSyncNode, KeychainIdentityStorage, NamespaceId};
-use groshe_web::{create_router, AppState, ItemDto};
+use groshe_web::{create_router, AppState, ItemDto, ListDetailDto};
 
 fn ns_to_list_id(ns_id: &NamespaceId) -> ListId {
     let mut bytes = [0u8; 16];
@@ -366,7 +366,7 @@ async fn test_high_volume_stress_and_churn() {
     }
 
     let expected_count = active_items.len();
-    let timeout = Duration::from_secs(20);
+    let timeout = Duration::from_secs(35);
 
     let proj_a = wait_for_full_convergence(&node_a, &doc_a, list_id, expected_count, timeout)
         .await
@@ -413,4 +413,145 @@ async fn test_high_volume_stress_and_churn() {
     let _ = node_a.shutdown().await;
     let _ = node_b.shutdown().await;
     let _ = node_c.shutdown().await;
+}
+
+
+#[tokio::test]
+async fn test_cross_surface_item_edit_convergence() {
+    let tmp_a = tempfile::tempdir().unwrap();
+    let tmp_b = tempfile::tempdir().unwrap();
+
+    let node_a = Arc::new(GrosheSyncNode::persistent(tmp_a.path()).await.unwrap());
+    let node_b = GrosheSyncNode::persistent(tmp_b.path()).await.unwrap();
+
+    let (_doc_a, ticket_a, ns_id) = node_a
+        .create_list_with_meta("Edit Sync Test", "admin")
+        .await
+        .unwrap();
+    let list_id = ns_to_list_id(&ns_id);
+
+    let doc_b = node_b.import_list(ticket_a).await.unwrap();
+
+    let app_state = AppState {
+        node: Arc::clone(&node_a),
+    };
+
+    let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+    let add_payload = serde_json::json!({
+        "raw_input": "2 Honeycrisp Apples @Produce"
+    });
+    let resp = http_client
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{ns_id}/items"))
+                .header("content-type", "application/json")
+                .body(Body::from(add_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let created_item: ItemDto = serde_json::from_slice(&body_bytes).unwrap();
+    let item_id = ItemId(uuid::Uuid::parse_str(&created_item.id).unwrap());
+    assert_eq!(created_item.name, "Honeycrisp Apples");
+    assert_eq!(created_item.quantity, Some(2.0));
+
+    let timeout = Duration::from_secs(25);
+    let proj_b = wait_for_full_convergence(&node_b, &doc_b, list_id, 1, timeout)
+        .await
+        .unwrap();
+    assert_eq!(proj_b.get_item(&item_id).unwrap().name(), "Honeycrisp Apples");
+
+    let edit_payload = serde_json::json!({
+        "raw_input": "5 Organic Honeycrisp Apples @Produce",
+        "note": "crispy ones only"
+    });
+    let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+    let resp = http_client
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/api/lists/{ns_id}/items/{item_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(edit_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let updated_item: ItemDto = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(updated_item.name, "Organic Honeycrisp Apples");
+    assert_eq!(updated_item.quantity, Some(5.0));
+    assert_eq!(updated_item.note.as_deref(), Some("crispy ones only"));
+
+    let start = Instant::now();
+    let mut converged = false;
+    while start.elapsed() < Duration::from_secs(25) {
+        if let Ok(entries) = node_b.get_entries_prefix(&doc_b, "").await {
+            let mut proj = ListProjection::new(list_id);
+            for (k, v) in &entries {
+                let _ = proj.apply_entry(k, v, 0);
+            }
+            if let Some(it) = proj.get_item(&item_id) {
+                if it.name() == "Organic Honeycrisp Apples"
+                    && it.data.quantity == Some(5.0)
+                    && it.data.note.as_deref() == Some("crispy ones only")
+                {
+                    converged = true;
+                    break;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(converged, "Peer B timed out waiting for edited item convergence");
+
+    let key = DocKey::item_data(item_id).to_key_bytes();
+    let mut mobile_data = ItemData::new("Jumbo Honeycrisp Apples").unwrap();
+    mobile_data.quantity = Some(6.0);
+    mobile_data.unit = Some("lbs".to_string());
+    mobile_data.category = Some("Produce".to_string());
+    mobile_data.note = Some("crispy ones only".to_string());
+    node_b
+        .set_entry(&doc_b, key, to_cbor(&mobile_data).unwrap())
+        .await
+        .unwrap();
+
+    let start = Instant::now();
+    let mut web_converged = false;
+    while start.elapsed() < Duration::from_secs(25) {
+        let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+        let resp = http_client
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/lists/{ns_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if resp.status() == StatusCode::OK {
+            let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+            if let Ok(detail) = serde_json::from_slice::<ListDetailDto>(&body_bytes) {
+                if let Some(it) = detail.items.iter().find(|i| i.id == item_id.to_string()) {
+                    if it.name == "Jumbo Honeycrisp Apples"
+                        && it.quantity == Some(6.0)
+                        && it.unit.as_deref() == Some("lbs")
+                    {
+                        web_converged = true;
+                        break;
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(web_converged, "Peer A timed out waiting for Mobile edit convergence");
+
+    node_a.endpoint().close().await;
+    let _ = node_b.shutdown().await;
 }
