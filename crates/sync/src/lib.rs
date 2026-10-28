@@ -25,7 +25,7 @@ pub use identity::{
     DeviceIdentity, FileIdentityStorage, IdentityStorage, KeychainIdentityStorage,
     KEYCHAIN_AUTHOR_ID_ACCOUNT, KEYCHAIN_DEFAULT_SERVICE, KEYCHAIN_SECRET_KEY_ACCOUNT,
 };
-pub use presence::{derive_presence_topic, PresencePayload};
+pub use presence::{derive_presence_topic, ActivePeerPresence, PresencePayload, PresenceTracker, DEFAULT_PRESENCE_TTL_SECS};
 pub use qr::render_qr_terminal;
 
 pub use iroh::endpoint::presets;
@@ -88,6 +88,7 @@ pub struct GrosheSyncNode {
     router: Arc<Router>,
     author_id: AuthorId,
     config: GrosheConfig,
+    presence: Arc<tokio::sync::RwLock<PresenceTracker>>,
 }
 
 impl GrosheSyncNode {
@@ -130,6 +131,7 @@ impl GrosheSyncNode {
             router: Arc::new(router),
             author_id,
             config: GrosheConfig::default(),
+            presence: Arc::new(tokio::sync::RwLock::new(PresenceTracker::default())),
         })
     }
 
@@ -225,6 +227,7 @@ impl GrosheSyncNode {
             router: Arc::new(router),
             author_id,
             config,
+            presence: Arc::new(tokio::sync::RwLock::new(PresenceTracker::default())),
         })
     }
 
@@ -787,6 +790,67 @@ impl GrosheSyncNode {
             .await
             .map_err(|e| SyncError::Storage(e.to_string()))?;
         Ok(bytes.to_vec())
+    }
+
+    /// Announces local presence for a list, recording it in the local `PresenceTracker`,
+    /// writing an ephemeral presence heartbeat entry to the list replica, and broadcasting over gossip.
+    pub async fn announce_presence(
+        &self,
+        namespace_id: &NamespaceId,
+        author_name: &str,
+        in_store: bool,
+    ) -> Result<ActivePeerPresence, SyncError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let payload = PresencePayload::new(self.author_id, author_name, in_store, now);
+        let active = {
+            let mut tracker = self.presence.write().await;
+            tracker.record_heartbeat(namespace_id, &payload)
+        };
+
+        if let Ok(Some(doc)) = self.open_list(*namespace_id).await {
+            let key = format!("presence/{}", self.author_id);
+            let _ = self.set_entry(&doc, key.into_bytes(), payload.to_bytes()).await;
+        }
+
+        let _ = self.publish_presence(namespace_id, in_store, author_name).await;
+        Ok(active)
+    }
+
+    /// Ingests raw CBOR presence payload bytes into the node's `PresenceTracker`.
+    pub async fn ingest_presence_bytes(
+        &self,
+        namespace_id: &NamespaceId,
+        bytes: &[u8],
+    ) -> Option<ActivePeerPresence> {
+        let payload = PresencePayload::from_bytes(bytes)?;
+        let mut tracker = self.presence.write().await;
+        Some(tracker.record_heartbeat(namespace_id, &payload))
+    }
+
+    /// Returns all currently active (non-expired) peers on the specified list.
+    pub async fn active_peers(
+        &self,
+        namespace_id: &NamespaceId,
+    ) -> Result<Vec<ActivePeerPresence>, SyncError> {
+        if let Ok(Some(doc)) = self.open_list(*namespace_id).await {
+            if let Ok(entries) = self.get_entries_prefix(&doc, "presence/").await {
+                let mut tracker = self.presence.write().await;
+                for (_k, v) in entries {
+                    if let Some(payload) = PresencePayload::from_bytes(&v) {
+                        tracker.record_heartbeat(namespace_id, &payload);
+                    }
+                }
+            }
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut tracker = self.presence.write().await;
+        Ok(tracker.active_peers(namespace_id, now))
     }
 
     /// Broadcast a presence update for a list over gossip.
