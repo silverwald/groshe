@@ -234,10 +234,12 @@ migration:
 3. Membership/authorization kept behind an abstraction in `sync`/`core`,
    never baked into the item model.
 
-Future household design (sketch, not v1 scope): a household is a *separate*
-index document holding a shared roster and references (namespace IDs) to
-member lists. Joining a household auto-shares its current and future lists.
-Existing per-list documents are not merged or rewritten.
+Household design (implemented): a household is a *separate* `iroh-docs`
+index document (`household/meta`, `household/members/<author_id>`,
+`household/lists/<list_id>`) holding a shared roster and references
+(`HouseholdListRef` with embedded `DocTicket`) to member lists. Joining a
+household auto-discovers and syncs its current and future lists without
+merging or rewriting existing per-list documents.
 
 ## 12. Build System: Cargo + Buck2 Spike
 
@@ -361,8 +363,12 @@ appears.
 - **Relay dependence:** NAT'd and all browser traffic transits relays. Mitigated
   by end-to-end encryption and self-hostable relay configuration; residual
   risk is relay availability/metadata, accepted for v1.
-- **Revocation UX:** rotation (§7) is disruptive (new tickets for everyone).
-  Accepted for v1; household iteration should soften it.
+- **Revocation UX:** rotation (§7) for standalone lists requires new tickets,
+  while lists belonging to a Household automatically archive the old list entry
+  and register the rotated list inside the Household document so remaining
+  household members migrate seamlessly without scanning a new ticket. Full
+  household rotation (`rotate_household`) rotates both the household and all
+  active member lists while evicting specified member `author_id`s.
 - **Slint license route** (GPL vs royalty-free vs commercial) must be chosen
   before public distribution; `cargo-deny` will enforce the choice.
 - **iOS background sync** is limited by the platform; v1 sets expectations
@@ -372,6 +378,12 @@ appears.
 
 ## Changelog
 
+- 2026-10-28 — Post-v1 Iterations completed:
+  - **In-Place Item Editing:** Full item metadata editing (`PATCH /api/lists/:id/items/:item_id`, Mobile Slint edit modal, CLI `grocery edit`) with cross-surface CRDT convergence.
+  - **Fractional Drag-to-Reorder:** HTML5 drag-and-drop and directional reordering (`POST /api/lists/:id/pos/:item_id`, Mobile Slint Up/Down controls, CLI `grocery pos`) using `ItemPosition::between`.
+  - **Household & Multi-List Grouping (§11):** Implemented `HouseholdMeta`, `HouseholdMember`, `HouseholdListRef`, `HouseholdDocKey`, and `HouseholdProjection`; automatic multi-list discovery and reconciliation across CLI (`grocery household`), Web Companion (`/api/households`), and Mobile.
+  - **Live Peer Presence & In-Store Indicators (§5, §10):** Implemented `PresenceTracker` with 45s TTL expiration, `POST /api/lists/:id/presence`, WebSocket live presence push, and 15s heartbeats + `"🛒 Shopping now"` badges in Web and Mobile Slint UIs.
+  - **Household-Aware List Rotation & Member Revocation (§7, §16):** Seamless per-list rotation inside households (zero ticket re-sharing for household members) and full `rotate_household` with member eviction.
 - 2026-10-20 — Phase 3 completed: iOS platform support with hardware-backed Keychain identity (`crates/sync`), C-FFI static library runtime (`apps/ios`), background execution lifecycle guard (foreground wake / background sleep), Swift/SwiftUI and Xcode project integration templates, and Justfile cross-compilation tasks. All 49 workspace tests pass.
 - 2026-10-18 — Phase 4 completed: Web companion (`apps/web`) with Axum REST API, WebSocket live subscription streaming, responsive Material 3 single-page web app, and `grocery serve --web` integration. All 47 workspace tests pass.
 - 2026-10-18 — Phase 5 completed: Hardening & extras (frequent-item suggestions with recency decay scoring, full JSON backup & Markdown export/import, item photo attachments via iroh-blobs with 256KB cap, configurable self-hosted relay support in `groshe.toml` with setup documentation).

@@ -1301,7 +1301,7 @@ relay_url = "disabled"
         drop(hh_doc_a);
         let bob_author = node_b.author_id().to_string();
         let (rotated_hh_doc, _, rotated_hh_id) = node_a
-            .rotate_household(hh_id, "Alice", &[bob_author.clone()])
+            .rotate_household(hh_id, "Alice", std::slice::from_ref(&bob_author))
             .await
             .unwrap();
         assert_ne!(hh_id, rotated_hh_id);
