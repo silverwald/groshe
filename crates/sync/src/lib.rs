@@ -373,6 +373,43 @@ impl GrosheSyncNode {
         drop(old_doc);
         let _ = self.delete_list(old_id).await;
 
+        // If this list belongs to any local Household, mark the old list archived
+        // and register the newly rotated list so household members auto-migrate without new tickets.
+        let old_id_str = old_id.to_string();
+        let new_title = self
+            .get_list_meta(&new_doc)
+            .await
+            .ok()
+            .flatten()
+            .map(|m| m.title)
+            .unwrap_or_else(|| "Rotated List".to_string());
+        if let Ok(hh_ids) = self.household_ids().await {
+            for hh_id in hh_ids {
+                if let Ok(Some(hh_doc)) = self.open_list(hh_id).await {
+                    if let Ok(lists) = self.get_household_lists(&hh_doc).await {
+                        if let Some(existing_ref) = lists
+                            .into_iter()
+                            .find(|l| l.list_id == old_id_str && !l.archived)
+                        {
+                            let archived_ref = existing_ref.with_archived(true);
+                            if let Ok(bytes) = to_cbor(&archived_ref) {
+                                let _ = self
+                                    .set_entry(
+                                        &hh_doc,
+                                        HouseholdDocKey::list(&old_id_str).to_key_bytes(),
+                                        bytes,
+                                    )
+                                    .await;
+                            }
+                            let _ = self
+                                .register_list_in_household(&hh_doc, &new_doc, &new_title)
+                                .await;
+                        }
+                    }
+                }
+            }
+        }
+
         Ok((new_doc, new_ticket, new_id))
     }
 
@@ -442,8 +479,25 @@ impl GrosheSyncNode {
             .is_some())
     }
 
-    /// List all local grocery list document NamespaceIds (excluding Household documents).
+    /// List all local grocery list document NamespaceIds (excluding Household documents and archived household lists).
     pub async fn list_ids(&self) -> Result<Vec<NamespaceId>, SyncError> {
+        let mut archived_ns = std::collections::HashSet::new();
+        if let Ok(hh_ids) = self.household_ids().await {
+            for hh_id in hh_ids {
+                if let Ok(Some(hh_doc)) = self.open_list(hh_id).await {
+                    if let Ok(lrefs) = self.get_household_lists(&hh_doc).await {
+                        for lref in lrefs {
+                            if lref.archived {
+                                if let Ok(ns) = NamespaceId::from_str(&lref.list_id) {
+                                    archived_ns.insert(ns);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let stream = self
             .docs
             .list()
@@ -454,6 +508,9 @@ impl GrosheSyncNode {
         while let Some(res) = stream.next().await {
             match res {
                 Ok((id, _state)) => {
+                    if archived_ns.contains(&id) {
+                        continue;
+                    }
                     let is_hh = if let Ok(Some(doc)) = self.open_list(id).await {
                         self.is_household_doc(&doc).await.unwrap_or(false)
                     } else {
@@ -638,9 +695,6 @@ impl GrosheSyncNode {
         let mut newly_joined = Vec::new();
 
         for lref in list_refs {
-            if lref.archived {
-                continue;
-            }
             let target_ns = NamespaceId::from_str(&lref.list_id).ok().or_else(|| {
                 DocTicket::from_str(&lref.ticket)
                     .ok()
@@ -649,6 +703,15 @@ impl GrosheSyncNode {
             let Some(ns_id) = target_ns else {
                 continue;
             };
+            if lref.archived {
+                if existing_ids.contains(&ns_id) {
+                    if let Ok(Some(old_doc)) = self.open_list(ns_id).await {
+                        let _ = old_doc.close().await;
+                    }
+                    let _ = self.delete_list(ns_id).await;
+                }
+                continue;
+            }
 
             if !existing_ids.contains(&ns_id) {
                 if let Ok((doc, _ticket)) = self.import_list_str(&lref.ticket).await {
@@ -662,6 +725,74 @@ impl GrosheSyncNode {
         }
 
         Ok(newly_joined)
+    }
+
+
+    /// Rotates an entire Household document and all of its active member lists into fresh namespaces,
+    /// optionally evicting specific member `author_id`s (exact match or prefix) per §7 & §16.
+    pub async fn rotate_household(
+        &self,
+        old_hh_id: NamespaceId,
+        author_name: &str,
+        evicted_authors: &[String],
+    ) -> Result<(Doc, DocTicket, NamespaceId), SyncError> {
+        let old_hh_doc = self
+            .open_list(old_hh_id)
+            .await?
+            .ok_or_else(|| SyncError::Doc(format!("Old household not found: {old_hh_id}")))?;
+
+        let hh_name = self
+            .get_household_meta(&old_hh_doc)
+            .await?
+            .map(|m| m.name)
+            .unwrap_or_else(|| "Rotated Household".to_string());
+        let old_members = self.get_household_members(&old_hh_doc).await?;
+        let old_lists = self.get_household_lists(&old_hh_doc).await?;
+
+        // Close and drop old household first so rotate_list does not write back to old_hh_doc
+        let _ = old_hh_doc.close().await;
+        drop(old_hh_doc);
+        let _ = self.delete_list(old_hh_id).await;
+
+        let (new_hh_doc, new_hh_ticket, new_hh_id) =
+            self.create_household(&hh_name, author_name).await?;
+
+        // Copy non-evicted members into the new household
+        for m in old_members {
+            let is_evicted = evicted_authors.iter().any(|ev| {
+                let trimmed = ev.trim();
+                !trimmed.is_empty()
+                    && (m.author_id == trimmed
+                        || m.author_id.starts_with(trimmed)
+                        || m.display_name.eq_ignore_ascii_case(trimmed))
+            });
+            if !is_evicted {
+                self.set_entry(
+                    &new_hh_doc,
+                    HouseholdDocKey::member(&m.author_id).to_key_bytes(),
+                    to_cbor(&m)?,
+                )
+                .await?;
+            }
+        }
+
+        // Rotate each active list and register the new list replica in the new household
+        for lref in old_lists {
+            if lref.archived {
+                continue;
+            }
+            if let Ok(old_list_ns) = NamespaceId::from_str(&lref.list_id) {
+                if let Ok((new_list_doc, _new_list_ticket, _new_list_id)) =
+                    self.rotate_list(old_list_ns, author_name).await
+                {
+                    let _ = self
+                        .register_list_in_household(&new_hh_doc, &new_list_doc, &lref.name)
+                        .await;
+                }
+            }
+        }
+
+        Ok((new_hh_doc, new_hh_ticket, new_hh_id))
     }
 
     /// Reconciles all local Household documents, importing any newly discovered shared lists.
@@ -1085,5 +1216,105 @@ relay_url = "disabled"
             "Bob failed to auto-discover household lists: {:?}",
             bob_lists
         );
+    }
+
+    #[tokio::test]
+    async fn test_household_aware_list_rotation_and_household_eviction() {
+        let node_a = GrosheSyncNode::memory().await.unwrap();
+        let node_b = GrosheSyncNode::memory().await.unwrap();
+
+        // 1. Alice creates a Household and a "Weekly Groceries" list with an item
+        let (hh_doc_a, hh_ticket_a, hh_id) = node_a
+            .create_household("Smith Family", "Alice")
+            .await
+            .unwrap();
+        let (list_doc_a, _, old_list_id) = node_a
+            .create_list_with_meta("Weekly Groceries", "Alice")
+            .await
+            .unwrap();
+        let item_id = groshe_core::ItemId::new_v7();
+        let item = groshe_core::ItemData::new("Organic Eggs").unwrap();
+        node_a
+            .set_entry(
+                &list_doc_a,
+                DocKey::item_data(item_id).to_key_bytes(),
+                to_cbor(&item).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        node_a
+            .register_list_in_household(&hh_doc_a, &list_doc_a, "Weekly Groceries")
+            .await
+            .unwrap();
+        let _ = list_doc_a.close().await;
+        drop(list_doc_a);
+
+        // 2. Bob joins the Household and auto-discovers `old_list_id`
+        let (hh_doc_b, _, _) = node_b
+            .join_household(&hh_ticket_a.to_string(), "Bob")
+            .await
+            .unwrap();
+
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(15) {
+            let _ = node_b.reconcile_household_lists(&hh_doc_b).await;
+            if node_b.list_ids().await.unwrap().contains(&old_list_id) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(node_b.list_ids().await.unwrap().contains(&old_list_id));
+
+        // 3. Alice rotates `old_list_id` -> `new_list_id`.
+        // Because `old_list_id` is in the Household, `rotate_list` automatically archives `old_list_id`
+        // and registers `new_list_id` in `hh_doc_a`.
+        let (new_list_doc_a, _, new_list_id) = node_a
+            .rotate_list(old_list_id, "Alice")
+            .await
+            .unwrap();
+        assert_ne!(old_list_id, new_list_id);
+
+        // 4. Bob reconciles the Household without scanning any new ticket:
+        // Bob automatically imports `new_list_id` and excludes the archived `old_list_id`!
+        let start = std::time::Instant::now();
+        let mut bob_migrated = false;
+        while start.elapsed() < std::time::Duration::from_secs(15) {
+            let _ = node_b.join_ticket(&hh_doc_b, &hh_ticket_a).await;
+            let _ = node_b.reconcile_household_lists(&hh_doc_b).await;
+            let bob_lists = node_b.list_ids().await.unwrap();
+            if bob_lists.contains(&new_list_id) && !bob_lists.contains(&old_list_id) {
+                bob_migrated = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let _ = new_list_doc_a.close().await;
+        drop(new_list_doc_a);
+        assert!(
+            bob_migrated,
+            "Bob failed to auto-migrate to rotated list and drop archived list"
+        );
+
+        // 5. Full Household rotation with member eviction: Alice rotates the household and evicts Bob
+        let _ = hh_doc_a.close().await;
+        drop(hh_doc_a);
+        let bob_author = node_b.author_id().to_string();
+        let (rotated_hh_doc, _, rotated_hh_id) = node_a
+            .rotate_household(hh_id, "Alice", &[bob_author.clone()])
+            .await
+            .unwrap();
+        assert_ne!(hh_id, rotated_hh_id);
+
+        let remaining_members = node_a.get_household_members(&rotated_hh_doc).await.unwrap();
+        assert_eq!(remaining_members.len(), 1);
+        assert_eq!(remaining_members[0].display_name, "Alice");
+
+        let rotated_lists = node_a.get_household_lists(&rotated_hh_doc).await.unwrap();
+        assert_eq!(rotated_lists.len(), 1);
+        assert_ne!(rotated_lists[0].list_id, new_list_id.to_string());
+
+        let _ = node_a.shutdown().await;
+        let _ = node_b.shutdown().await;
     }
 }
