@@ -24,9 +24,10 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::api::{
-    AddHouseholdListRequest, AddItemRequest, CreateHouseholdRequest, HouseholdDto,
+    ActivePeerDto, AddHouseholdListRequest, AddItemRequest, CreateHouseholdRequest, HouseholdDto,
     HouseholdListDto, HouseholdMemberDto, ItemDto, JoinHouseholdRequest, ListDetailDto,
     ListSummaryDto, NodeStatusDto, ReorderItemRequest, ToggleCheckRequest, UpdateItemRequest,
+    UpdatePresenceRequest,
 };
 
 #[derive(Clone)]
@@ -87,6 +88,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/households/:id/lists", post(add_household_list))
         .route("/api/lists", get(get_lists))
         .route("/api/lists/:id", get(get_list))
+        .route("/api/lists/:id/presence", post(update_presence))
         .route("/api/lists/:id/items", post(add_item))
         .route("/api/lists/:id/items/:item_id", patch(update_item))
         .route("/api/lists/:id/pos/:item_id", post(reorder_item))
@@ -358,6 +360,8 @@ async fn get_list(
         })
         .collect();
 
+    let active_peers = load_active_peer_dtos(&state.node, &ns_id).await;
+
     Ok(Json(ListDetailDto {
         id: id_str,
         title: meta
@@ -370,7 +374,46 @@ async fn get_list(
             .unwrap_or_default(),
         created_at: meta.as_ref().map(|m| m.created_at).unwrap_or(0),
         items,
+        active_peers,
     }))
+}
+
+async fn load_active_peer_dtos(node: &GrosheSyncNode, ns_id: &NamespaceId) -> Vec<ActivePeerDto> {
+    node.active_peers(ns_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| ActivePeerDto {
+            author_id: p.author_id,
+            author_name: p.author_name,
+            in_store: p.in_store,
+            last_seen: p.last_seen,
+        })
+        .collect()
+}
+
+async fn update_presence(
+    State(state): State<AppState>,
+    Path(id_str): Path<String>,
+    Json(req): Json<UpdatePresenceRequest>,
+) -> Result<Json<Vec<ActivePeerDto>>, AppError> {
+    let ns_id = NamespaceId::from_str(&id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let default_name = format!("web-{}", &state.node.author_id().to_string()[..6]);
+    let author_name = req
+        .author_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&default_name);
+
+    state
+        .node
+        .announce_presence(&ns_id, author_name, req.in_store)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let peers = load_active_peer_dtos(&state.node, &ns_id).await;
+    Ok(Json(peers))
 }
 
 async fn add_item(
@@ -857,11 +900,13 @@ async fn handle_socket(socket: WebSocket, node: Arc<GrosheSyncNode>, doc: Doc, n
             })
             .collect();
 
+        let active_peers = load_active_peer_dtos(&node, &ns_id).await;
         let initial_msg = serde_json::json!({
             "type": "initial",
             "list_id": ns_id.to_string(),
             "title": proj.title(),
             "items": items,
+            "active_peers": active_peers,
         });
         let _ = sender.send(Message::Text(initial_msg.to_string())).await;
     }
@@ -890,9 +935,11 @@ async fn handle_socket(socket: WebSocket, node: Arc<GrosheSyncNode>, doc: Doc, n
                                 position: item.position.to_string(),
                                 photo_hash: item.data.photo_hash.map(|h| h.iter().map(|b| format!("{:02x}", b)).collect()),
                             }).collect();
+                            let active_peers = load_active_peer_dtos(&node, &ns_id).await;
                             let update_msg = serde_json::json!({
                                 "type": "update",
                                 "items": items,
+                                "active_peers": active_peers,
                             });
                             if sender.send(Message::Text(update_msg.to_string())).await.is_err() {
                                 break;

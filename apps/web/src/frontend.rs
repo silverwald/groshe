@@ -272,7 +272,9 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
       <select id="listSelect" onchange="changeList()">
         <option value="">Loading lists...</option>
       </select>
+      <button type="button" id="inStoreBtn" onclick="toggleInStoreMode()" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; white-space: nowrap;">🛒 In-Store: OFF</button>
     </div>
+    <div id="presenceBar" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 24px; align-items: center;"></div>
 
     <form class="add-bar" onsubmit="handleAddItem(event)">
       <input type="text" id="itemInput" placeholder="Quick add (e.g. '2 gal milk @dairy', 'apples 3 lbs')..." autofocus>
@@ -386,13 +388,73 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
       loadActiveList();
     }
 
+    let inStoreMode = false;
+
+    async function sendPresenceHeartbeat() {
+      if (!activeListId) return;
+      try {
+        const res = await fetch(`/api/lists/${activeListId}/presence`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ in_store: inStoreMode })
+        });
+        const peers = await res.json();
+        renderPresence(peers);
+      } catch (e) {}
+    }
+
+    function toggleInStoreMode() {
+      inStoreMode = !inStoreMode;
+      const btn = document.getElementById('inStoreBtn');
+      if (inStoreMode) {
+        btn.textContent = '🛒 In-Store: ON';
+        btn.style.background = '#1b5e20';
+        btn.style.borderColor = '#4caf50';
+      } else {
+        btn.textContent = '🛒 In-Store: OFF';
+        btn.style.background = 'var(--surface)';
+        btn.style.borderColor = 'var(--border)';
+      }
+      sendPresenceHeartbeat();
+    }
+
+    function renderPresence(peers) {
+      const bar = document.getElementById('presenceBar');
+      if (!bar) return;
+      if (!peers || peers.length === 0) {
+        bar.innerHTML = '<span style="font-size: 0.8rem; color: var(--text-muted);">No active peers right now</span>';
+        return;
+      }
+      bar.innerHTML = '';
+      peers.forEach(p => {
+        const pill = document.createElement('span');
+        pill.style.fontSize = '0.8rem';
+        pill.style.padding = '4px 10px';
+        pill.style.borderRadius = '16px';
+        if (p.in_store) {
+          pill.style.background = '#1b5e20';
+          pill.style.color = '#a5d6a7';
+          pill.textContent = `🛒 ${p.author_name} shopping now`;
+        } else {
+          pill.style.background = '#2a2a2a';
+          pill.style.color = '#bdbdbd';
+          pill.textContent = `● ${p.author_name} viewing`;
+        }
+        bar.appendChild(pill);
+      });
+    }
+
+    setInterval(sendPresenceHeartbeat, 15000);
+
     async function loadActiveList() {
       if (!activeListId) return;
       connectWebSocket(activeListId);
+      sendPresenceHeartbeat();
       try {
         const res = await fetch(`/api/lists/${activeListId}`);
         const data = await res.json();
         renderItems(data.items);
+        if (data.active_peers) renderPresence(data.active_peers);
       } catch (e) {
         console.error('Failed to fetch list', e);
       }
@@ -419,6 +481,9 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
           const msg = JSON.parse(e.data);
           if (msg.items) {
             renderItems(msg.items);
+          }
+          if (msg.active_peers) {
+            renderPresence(msg.active_peers);
           }
         } catch (err) {}
       };

@@ -5,7 +5,8 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use groshe_sync::GrosheSyncNode;
 use groshe_web::{
-    create_router, AppState, HouseholdDto, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto,
+    create_router, ActivePeerDto, AppState, HouseholdDto, ItemDto, ListDetailDto, ListSummaryDto,
+    NodeStatusDto,
 };
 use http_body_util::BodyExt;
 use std::sync::Arc;
@@ -490,4 +491,57 @@ async fn test_web_household_endpoints() {
     let all_hhs: Vec<HouseholdDto> = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(all_hhs.len(), 1);
     assert_eq!(all_hhs[0].lists.len(), 2);
+}
+
+#[tokio::test]
+async fn test_web_presence_endpoints() {
+    let node = Arc::new(GrosheSyncNode::memory().await.unwrap());
+    let (_doc, _ticket, list_id) = node
+        .create_list_with_meta("Trader Joe's", "alice")
+        .await
+        .unwrap();
+
+    let app = create_router(AppState { node });
+
+    // 1. Announce presence with in_store = true
+    let payload = serde_json::json!({
+        "in_store": true,
+        "author_name": "Alice (Phone)"
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{list_id}/presence"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let peers: Vec<ActivePeerDto> = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(peers.len(), 1);
+    assert_eq!(peers[0].author_name, "Alice (Phone)");
+    assert!(peers[0].in_store);
+
+    // 2. Verify GET /api/lists/:id includes active_peers
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/lists/{list_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let detail: ListDetailDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(detail.active_peers.len(), 1);
+    assert_eq!(detail.active_peers[0].author_name, "Alice (Phone)");
+    assert!(detail.active_peers[0].in_store);
 }

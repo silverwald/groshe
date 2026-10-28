@@ -25,6 +25,21 @@ pub struct ItemDto {
     pub photo_hash: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActivePeerDto {
+    pub author_id: String,
+    pub author_name: String,
+    pub in_store: bool,
+    pub last_seen: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdatePresenceRequest {
+    pub in_store: bool,
+    #[serde(default)]
+    pub author_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ListDetailDto {
     pub id: String,
@@ -32,6 +47,8 @@ pub struct ListDetailDto {
     pub created_by: String,
     pub created_at: u64,
     pub items: Vec<ItemDto>,
+    #[serde(default)]
+    pub active_peers: Vec<ActivePeerDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
