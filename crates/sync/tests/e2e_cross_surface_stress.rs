@@ -430,7 +430,7 @@ async fn test_cross_surface_item_edit_convergence() {
         .unwrap();
     let list_id = ns_to_list_id(&ns_id);
 
-    let doc_b = node_b.import_list(ticket_a).await.unwrap();
+    let doc_b = node_b.import_list(ticket_a.clone()).await.unwrap();
 
     let app_state = AppState {
         node: Arc::clone(&node_a),
@@ -552,7 +552,7 @@ async fn test_cross_surface_item_edit_convergence() {
     }
     assert!(web_converged, "Peer A timed out waiting for Mobile edit convergence");
 
-    node_a.endpoint().close().await;
+    let _ = node_a.shutdown().await;
     let _ = node_b.shutdown().await;
 }
 #[tokio::test]
@@ -749,7 +749,7 @@ async fn test_cross_surface_item_reorder_convergence() {
     }
     assert!(web_converged, "Peer A (Web Companion) timed out waiting for concurrent reorder & check convergence");
 
-    node_a.endpoint().close().await;
+    let _ = node_a.shutdown().await;
     let _ = node_b.shutdown().await;
 }
 
@@ -866,6 +866,6 @@ async fn test_cross_surface_household_and_live_presence_convergence() {
         "Peer A Web Companion failed to converge on Peer B live in-store presence"
     );
 
-    node_a.endpoint().close().await;
+    let _ = node_a.shutdown().await;
     let _ = node_b.shutdown().await;
 }

@@ -300,13 +300,12 @@ impl GrosheSyncNode {
     }
 
     /// Shut down the underlying Iroh router and protocols.
-    pub async fn shutdown(self) -> Result<(), SyncError> {
-        if let Ok(router) = Arc::try_unwrap(self.router) {
-            router
-                .shutdown()
-                .await
-                .map_err(|e| SyncError::Endpoint(e.to_string()))?;
-        }
+    pub async fn shutdown(&self) -> Result<(), SyncError> {
+        self.router
+            .shutdown()
+            .await
+            .map_err(|e| SyncError::Endpoint(e.to_string()))?;
+        self.endpoint.close().await;
         Ok(())
     }
 
