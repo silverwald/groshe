@@ -4,7 +4,9 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use groshe_sync::GrosheSyncNode;
-use groshe_web::{create_router, AppState, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto};
+use groshe_web::{
+    create_router, AppState, HouseholdDto, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto,
+};
 use http_body_util::BodyExt;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -418,4 +420,74 @@ async fn test_web_reorder_item_endpoints() {
     assert_eq!(detail.items[0].name, "Bananas");
     assert_eq!(detail.items[1].name, "Carrots");
     assert_eq!(detail.items[2].name, "Apples");
+}
+
+#[tokio::test]
+async fn test_web_household_endpoints() {
+    let node = Arc::new(GrosheSyncNode::memory().await.unwrap());
+    let (_doc, _ticket, existing_list_id) = node
+        .create_list_with_meta("Weekly Groceries", "alice")
+        .await
+        .unwrap();
+
+    let app = create_router(AppState { node });
+
+    // 1. POST /api/households creates a household and auto-registers existing local lists
+    let create_payload = serde_json::json!({ "name": "Smith Family" });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/households")
+                .header("content-type", "application/json")
+                .body(Body::from(create_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let created_hh: HouseholdDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(created_hh.name, "Smith Family");
+    assert_eq!(created_hh.members.len(), 1);
+    assert_eq!(created_hh.lists.len(), 1);
+    assert_eq!(created_hh.lists[0].list_id, existing_list_id.to_string());
+    assert_eq!(created_hh.lists[0].name, "Weekly Groceries");
+
+    // 2. POST /api/households/:id/lists creates a new list directly inside the household
+    let new_list_payload = serde_json::json!({ "title": "Hardware Store" });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/households/{}/lists", created_hh.id))
+                .header("content-type", "application/json")
+                .body(Body::from(new_list_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let updated_hh: HouseholdDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(updated_hh.lists.len(), 2);
+
+    // 3. GET /api/households returns the household with both lists
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/households")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let all_hhs: Vec<HouseholdDto> = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(all_hhs.len(), 1);
+    assert_eq!(all_hhs[0].lists.len(), 2);
 }

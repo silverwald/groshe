@@ -99,3 +99,45 @@ pub struct NodeStatusDto {
     pub relay: String,
     pub lists_count: usize,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HouseholdMemberDto {
+    pub author_id: String,
+    pub display_name: String,
+    pub joined_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HouseholdListDto {
+    pub list_id: String,
+    pub name: String,
+    pub archived: bool,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HouseholdDto {
+    pub id: String,
+    pub name: String,
+    pub ticket: String,
+    pub members: Vec<HouseholdMemberDto>,
+    pub lists: Vec<HouseholdListDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateHouseholdRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinHouseholdRequest {
+    pub ticket: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AddHouseholdListRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub list_id: Option<String>,
+}

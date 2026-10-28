@@ -24,8 +24,9 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::api::{
-    AddItemRequest, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto, ReorderItemRequest,
-    ToggleCheckRequest, UpdateItemRequest,
+    AddHouseholdListRequest, AddItemRequest, CreateHouseholdRequest, HouseholdDto,
+    HouseholdListDto, HouseholdMemberDto, ItemDto, JoinHouseholdRequest, ListDetailDto,
+    ListSummaryDto, NodeStatusDto, ReorderItemRequest, ToggleCheckRequest, UpdateItemRequest,
 };
 
 #[derive(Clone)]
@@ -81,6 +82,9 @@ pub fn create_router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/status", get(get_status))
+        .route("/api/households", get(get_households).post(create_household))
+        .route("/api/households/join", post(join_household))
+        .route("/api/households/:id/lists", post(add_household_list))
         .route("/api/lists", get(get_lists))
         .route("/api/lists/:id", get(get_list))
         .route("/api/lists/:id/items", post(add_item))
@@ -117,7 +121,179 @@ async fn get_status(State(state): State<AppState>) -> Result<Json<NodeStatusDto>
     }))
 }
 
+async fn build_household_dto(
+    node: &GrosheSyncNode,
+    hh_id: NamespaceId,
+    hh_doc: &Doc,
+) -> Result<HouseholdDto, AppError> {
+    let meta = node
+        .get_household_meta(hh_doc)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let name = meta
+        .map(|m| m.name)
+        .unwrap_or_else(|| "Untitled Household".to_string());
+    let ticket = node
+        .share_ticket(hh_doc)
+        .await
+        .map(|t| t.to_string())
+        .unwrap_or_default();
+    let members = node
+        .get_household_members(hh_doc)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .into_iter()
+        .map(|m| HouseholdMemberDto {
+            author_id: m.author_id,
+            display_name: m.display_name,
+            joined_at: m.joined_at,
+        })
+        .collect();
+    let lists = node
+        .get_household_lists(hh_doc)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .into_iter()
+        .map(|l| HouseholdListDto {
+            list_id: l.list_id,
+            name: l.name,
+            archived: l.archived,
+            created_at: l.created_at,
+        })
+        .collect();
+
+    Ok(HouseholdDto {
+        id: hh_id.to_string(),
+        name,
+        ticket,
+        members,
+        lists,
+    })
+}
+
+async fn get_households(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<HouseholdDto>>, AppError> {
+    let _ = state.node.reconcile_all_households().await;
+    let hh_ids = state
+        .node
+        .household_ids()
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let mut out = Vec::new();
+    for hh_id in hh_ids {
+        if let Ok(Some(hh_doc)) = state.node.open_list(hh_id).await {
+            if let Ok(dto) = build_household_dto(&state.node, hh_id, &hh_doc).await {
+                out.push(dto);
+            }
+        }
+    }
+    Ok(Json(out))
+}
+
+async fn create_household(
+    State(state): State<AppState>,
+    Json(req): Json<CreateHouseholdRequest>,
+) -> Result<(StatusCode, Json<HouseholdDto>), AppError> {
+    let author_name = format!("web-{}", &state.node.author_id().to_string()[..6]);
+    let (hh_doc, _ticket, hh_id) = state
+        .node
+        .create_household(&req.name, &author_name)
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    // Register existing local lists into the newly created household
+    if let Ok(list_ids) = state.node.list_ids().await {
+        for lid in list_ids {
+            if let Ok(Some(ldoc)) = state.node.open_list(lid).await {
+                let title = state
+                    .node
+                    .get_list_meta(&ldoc)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|m| m.title)
+                    .unwrap_or_else(|| "Untitled List".to_string());
+                let _ = state
+                    .node
+                    .register_list_in_household(&hh_doc, &ldoc, &title)
+                    .await;
+            }
+        }
+    }
+
+    let dto = build_household_dto(&state.node, hh_id, &hh_doc).await?;
+    Ok((StatusCode::CREATED, Json(dto)))
+}
+
+async fn join_household(
+    State(state): State<AppState>,
+    Json(req): Json<JoinHouseholdRequest>,
+) -> Result<Json<HouseholdDto>, AppError> {
+    let author_name = format!("web-{}", &state.node.author_id().to_string()[..6]);
+    let (hh_doc, _ticket, hh_id) = state
+        .node
+        .join_household(&req.ticket, &author_name)
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let dto = build_household_dto(&state.node, hh_id, &hh_doc).await?;
+    Ok(Json(dto))
+}
+
+async fn add_household_list(
+    State(state): State<AppState>,
+    Path(hh_id_str): Path<String>,
+    Json(req): Json<AddHouseholdListRequest>,
+) -> Result<(StatusCode, Json<HouseholdDto>), AppError> {
+    let hh_id =
+        NamespaceId::from_str(&hh_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let hh_doc = state
+        .node
+        .open_list(hh_id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("Household '{hh_id_str}' not found")))?;
+
+    if let Some(list_id_str) = req.list_id {
+        let list_ns =
+            NamespaceId::from_str(&list_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+        let list_doc = state
+            .node
+            .open_list(list_ns)
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::NotFound(format!("List '{list_id_str}' not found")))?;
+        let title = req.title.unwrap_or_else(|| "Shared List".to_string());
+        state
+            .node
+            .register_list_in_household(&hh_doc, &list_doc, &title)
+            .await
+            .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    } else if let Some(title) = req.title {
+        let author_name = format!("web-{}", &state.node.author_id().to_string()[..6]);
+        let (list_doc, _ticket, _ns) = state
+            .node
+            .create_list_with_meta(&title, &author_name)
+            .await
+            .map_err(|e| AppError::BadRequest(e.to_string()))?;
+        state
+            .node
+            .register_list_in_household(&hh_doc, &list_doc, &title)
+            .await
+            .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    } else {
+        return Err(AppError::BadRequest(
+            "Provide either title (to create a new list) or list_id (to attach an existing list)"
+                .to_string(),
+        ));
+    }
+
+    let dto = build_household_dto(&state.node, hh_id, &hh_doc).await?;
+    Ok((StatusCode::CREATED, Json(dto)))
+}
+
 async fn get_lists(State(state): State<AppState>) -> Result<Json<Vec<ListSummaryDto>>, AppError> {
+    let _ = state.node.reconcile_all_households().await;
     let ids = state
         .node
         .list_ids()

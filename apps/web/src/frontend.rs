@@ -260,6 +260,14 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
   </header>
 
   <div class="container">
+    <div class="list-picker-row" id="householdBar" style="background: var(--surface); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 0.9rem;">
+      <span id="householdInfo">🏠 Household: None</span>
+      <div style="display: flex; gap: 8px;">
+        <button type="button" onclick="promptNewHouseholdList()" style="background: var(--card); color: var(--text); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">+ List</button>
+        <button type="button" onclick="promptCreateOrJoinHousehold()" style="background: var(--card); color: var(--accent); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">🏠 Household</button>
+      </div>
+    </div>
+
     <div class="list-picker-row">
       <select id="listSelect" onchange="changeList()">
         <option value="">Loading lists...</option>
@@ -278,10 +286,80 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
 
   <script>
     let activeListId = null;
+    let activeHousehold = null;
     let ws = null;
+
+    async function loadHouseholds() {
+      try {
+        const res = await fetch('/api/households');
+        const hhs = await res.json();
+        const info = document.getElementById('householdInfo');
+        if (hhs && hhs.length > 0) {
+          activeHousehold = hhs[0];
+          info.textContent = `🏠 ${activeHousehold.name} (${activeHousehold.members.length} members, ${activeHousehold.lists.length} lists)`;
+        } else {
+          activeHousehold = null;
+          info.textContent = '🏠 Individual Mode (No Household)';
+        }
+      } catch (e) {}
+    }
+
+    async function promptCreateOrJoinHousehold() {
+      if (activeHousehold) {
+        prompt('Share this Household Ticket with family members:', activeHousehold.ticket);
+        return;
+      }
+      const input = prompt('Enter a Household Name to create one, or paste a Household Ticket to join:');
+      if (!input || !input.trim()) return;
+      const val = input.trim();
+      try {
+        if (val.startsWith('doc') && val.length > 40) {
+          await fetch('/api/households/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticket: val })
+          });
+        } else {
+          await fetch('/api/households', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: val })
+          });
+        }
+        await init();
+      } catch (e) {
+        console.error('Household operation failed', e);
+      }
+    }
+
+    async function promptNewHouseholdList() {
+      const title = prompt('New grocery list title (e.g. Costco Run, Hardware Store):');
+      if (!title || !title.trim()) return;
+      try {
+        if (!activeHousehold) {
+          await fetch('/api/households', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'My Household' })
+          });
+          await loadHouseholds();
+        }
+        if (activeHousehold) {
+          await fetch(`/api/households/${activeHousehold.id}/lists`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title.trim() })
+          });
+          await init();
+        }
+      } catch (e) {
+        console.error('Failed to create list in household', e);
+      }
+    }
 
     async function init() {
       try {
+        await loadHouseholds();
         const res = await fetch('/api/lists');
         const lists = await res.json();
         const select = document.getElementById('listSelect');

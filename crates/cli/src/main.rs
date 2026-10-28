@@ -8,7 +8,8 @@ use std::str::FromStr;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::args::{
-    resolve_data_dir, Cli, Commands, ExportFormat, ExportItemDto, ExportListDto, ListCommands,
+    resolve_data_dir, Cli, Commands, ExportFormat, ExportItemDto, ExportListDto, HouseholdCommands,
+    ListCommands,
 };
 
 async fn resolve_target_doc(
@@ -54,6 +55,52 @@ async fn resolve_target_doc(
         .open_list(target_id)
         .await?
         .ok_or_else(|| format!("Failed to open document replica for {target_id}"))?;
+
+    Ok((target_id, doc))
+}
+
+
+async fn resolve_target_household(
+    node: &GrosheSyncNode,
+    hh_arg: Option<String>,
+) -> Result<(NamespaceId, Doc), Box<dyn std::error::Error>> {
+    let ids = node.household_ids().await?;
+    if ids.is_empty() {
+        return Err("No local households found. Create one with `grocery household create <name>` or join with `grocery household join <ticket>`".into());
+    }
+
+    let target_id = if let Some(arg) = hh_arg {
+        let trimmed = arg.trim();
+        if let Ok(exact) = NamespaceId::from_str(trimmed) {
+            exact
+        } else {
+            let matched: Vec<NamespaceId> = ids
+                .iter()
+                .filter(|id| id.to_string().starts_with(trimmed))
+                .copied()
+                .collect();
+            if matched.is_empty() {
+                return Err(format!("No household matching ID prefix '{trimmed}'").into());
+            }
+            if matched.len() > 1 {
+                return Err(format!(
+                    "Ambiguous household prefix '{trimmed}' matched {} households",
+                    matched.len()
+                )
+                .into());
+            }
+            matched[0]
+        }
+    } else if ids.len() == 1 {
+        ids[0]
+    } else {
+        return Err("Multiple households available. Please specify --household <id>".into());
+    };
+
+    let doc = node
+        .open_list(target_id)
+        .await?
+        .ok_or_else(|| format!("Failed to open household document for {target_id}"))?;
 
     Ok((target_id, doc))
 }
@@ -155,8 +202,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match action {
                 ListCommands::Create { title } => {
                     let author_name = format!("cli-{}", &node.author_id().to_string()[..6]);
-                    let (_doc, ticket, ns_id) =
+                    let (doc, ticket, ns_id) =
                         node.create_list_with_meta(&title, &author_name).await?;
+                    if let Ok(hh_ids) = node.household_ids().await {
+                        if hh_ids.len() == 1 {
+                            if let Ok(Some(hh_doc)) = node.open_list(hh_ids[0]).await {
+                                let _ = node.register_list_in_household(&hh_doc, &doc, &title).await;
+                            }
+                        }
+                    }
                     if cli.json {
                         println!(
                             "{}",
@@ -175,6 +229,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 ListCommands::Ls => {
+                    let _ = node.reconcile_all_households().await;
                     let ids = node.list_ids().await?;
                     if cli.json {
                         let mut list_dtos = Vec::new();
@@ -284,6 +339,155 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     } else {
                         println!("Removed list replica for: {}", ns_id);
+                    }
+                }
+            }
+            node.shutdown().await?;
+        }
+
+        Commands::Household { action } => {
+            let node = GrosheSyncNode::persistent(&data_dir).await?;
+            let author_name = format!("cli-{}", &node.author_id().to_string()[..6]);
+            match action {
+                HouseholdCommands::Create { name } => {
+                    let (hh_doc, ticket, ns_id) =
+                        node.create_household(&name, &author_name).await?;
+                    // Auto-register existing local grocery lists into the new household
+                    if let Ok(list_ids) = node.list_ids().await {
+                        for lid in list_ids {
+                            if let Ok(Some(ldoc)) = node.open_list(lid).await {
+                                let title = node
+                                    .get_list_meta(&ldoc)
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .map(|m| m.title)
+                                    .unwrap_or_else(|| "Untitled List".to_string());
+                                let _ = node
+                                    .register_list_in_household(&hh_doc, &ldoc, &title)
+                                    .await;
+                            }
+                        }
+                    }
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "status": "created",
+                                "name": name,
+                                "id": ns_id.to_string(),
+                                "ticket": ticket.to_string()
+                            })
+                        );
+                    } else {
+                        println!("Created household '{}'", name);
+                        println!("Household ID: {}", ns_id);
+                        println!("Ticket:       {}", ticket);
+                    }
+                }
+
+                HouseholdCommands::Join { ticket } => {
+                    let (hh_doc, _, ns_id) = node.join_household(&ticket, &author_name).await?;
+                    let meta = node.get_household_meta(&hh_doc).await.ok().flatten();
+                    let name = meta
+                        .as_ref()
+                        .map(|m| m.name.as_str())
+                        .unwrap_or("Joined Household");
+                    let imported = node.reconcile_household_lists(&hh_doc).await.unwrap_or_default();
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "status": "joined",
+                                "id": ns_id.to_string(),
+                                "name": name,
+                                "imported_lists": imported.len()
+                            })
+                        );
+                    } else {
+                        println!(
+                            "Successfully joined household '{}' (ID: {}, {} lists synced)",
+                            name,
+                            ns_id,
+                            imported.len()
+                        );
+                    }
+                }
+
+                HouseholdCommands::Share { household } => {
+                    let (ns_id, hh_doc) = resolve_target_household(&node, household).await?;
+                    let ticket = node.share_ticket(&hh_doc).await?;
+                    let qr = node.render_ticket_qr(&ticket)?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "id": ns_id.to_string(),
+                                "ticket": ticket.to_string()
+                            })
+                        );
+                    } else {
+                        println!("Share Ticket for household [{}]:", &ns_id.to_string()[..12]);
+                        println!("\n{}\n", qr);
+                        println!("Ticket String:\n{}", ticket);
+                    }
+                }
+
+                HouseholdCommands::Show { household } => {
+                    let (ns_id, hh_doc) = resolve_target_household(&node, household).await?;
+                    let _ = node.reconcile_household_lists(&hh_doc).await;
+                    let meta = node.get_household_meta(&hh_doc).await.ok().flatten();
+                    let name = meta
+                        .as_ref()
+                        .map(|m| m.name.as_str())
+                        .unwrap_or("Untitled Household");
+                    let members = node.get_household_members(&hh_doc).await?;
+                    let lists = node.get_household_lists(&hh_doc).await?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "id": ns_id.to_string(),
+                                "name": name,
+                                "members": members,
+                                "lists": lists
+                            })
+                        );
+                    } else {
+                        println!("Household: {} ({})", name, &ns_id.to_string()[..12]);
+                        println!("Members ({}):", members.len());
+                        for m in &members {
+                            println!("  - {} ({})", m.display_name, &m.author_id[..12.min(m.author_id.len())]);
+                        }
+                        println!("Lists ({}):", lists.len());
+                        for l in &lists {
+                            let status = if l.archived { " [archived]" } else { "" };
+                            println!("  - {} ({}){}", l.name, &l.list_id[..12.min(l.list_id.len())], status);
+                        }
+                    }
+                }
+
+                HouseholdCommands::AddList { list, household } => {
+                    let (_hh_id, hh_doc) = resolve_target_household(&node, household).await?;
+                    let (list_id, list_doc) = resolve_target_doc(&node, list).await?;
+                    let title = node
+                        .get_list_meta(&list_doc)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|m| m.title)
+                        .unwrap_or_else(|| "Untitled List".to_string());
+                    let lref = node
+                        .register_list_in_household(&hh_doc, &list_doc, &title)
+                        .await?;
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&lref)?);
+                    } else {
+                        println!(
+                            "Registered list '{}' ({}) in household.",
+                            lref.name,
+                            &list_id.to_string()[..12]
+                        );
                     }
                 }
             }

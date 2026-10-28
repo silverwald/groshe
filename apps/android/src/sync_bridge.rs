@@ -101,6 +101,7 @@ fn projection_to_slint_items(proj: &ListProjection) -> Vec<GroceryItemData> {
 }
 
 async fn load_lists_info(node: &GrosheSyncNode) -> Vec<GroceryListInfo> {
+    let _ = node.reconcile_all_households().await;
     let ids = node.list_ids().await.unwrap_or_default();
     let mut list_infos = Vec::new();
     for id in ids {
@@ -240,6 +241,13 @@ pub fn spawn_sync_bridge(
                     match cmd {
                         SyncCommand::CreateList { title } => {
                             if let Ok((new_doc, new_ticket, new_id)) = node.create_list_with_meta(&title, &author_name).await {
+                                if let Ok(hh_ids) = node.household_ids().await {
+                                    for hh_id in hh_ids {
+                                        if let Ok(Some(hh_doc)) = node.open_list(hh_id).await {
+                                            let _ = node.register_list_in_household(&hh_doc, &new_doc, &title).await;
+                                        }
+                                    }
+                                }
                                 active_doc = new_doc;
                                 active_ns_id = new_id;
                                 events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
@@ -567,7 +575,20 @@ pub fn spawn_sync_bridge(
 
                         SyncCommand::JoinTicket { ticket_str } => {
                             if let Ok((doc, ticket)) = node.import_list_str(&ticket_str).await {
-                                active_doc = doc;
+                                if node.is_household_doc(&doc).await.unwrap_or(false) {
+                                    let _ = node.join_household(&ticket_str, &author_name).await;
+                                    if let Some(first_list_id) = node.list_ids().await.unwrap_or_default().first().copied() {
+                                        if let Ok(Some(ldoc)) = node.open_list(first_list_id).await {
+                                            active_doc = ldoc;
+                                        } else {
+                                            active_doc = doc;
+                                        }
+                                    } else {
+                                        active_doc = doc;
+                                    }
+                                } else {
+                                    active_doc = doc;
+                                }
                                 active_ns_id = active_doc.id();
                                 events_stream = node.subscribe_doc(&active_doc).await.ok().map(Box::pin);
 

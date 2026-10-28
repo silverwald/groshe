@@ -35,6 +35,12 @@ pub enum Commands {
         action: ListCommands,
     },
 
+    /// Manage shared households and multi-list grouping (create, join, share, show, add-list)
+    Household {
+        #[command(subcommand)]
+        action: HouseholdCommands,
+    },
+
     /// Add an item to a grocery list
     Add {
         /// Name of the grocery item
@@ -244,6 +250,42 @@ pub enum ListCommands {
     Rm {
         /// Target list ID or prefix
         list: String,
+    },
+}
+
+
+#[derive(Subcommand, Debug)]
+pub enum HouseholdCommands {
+    /// Create a new shared household
+    Create {
+        /// Name of the household (e.g. "Smith Family")
+        name: String,
+    },
+    /// Join an existing household using a DocTicket and auto-import all household lists
+    Join {
+        /// The Household DocTicket string
+        ticket: String,
+    },
+    /// Generate a sharing DocTicket and ASCII QR code for a household
+    Share {
+        /// Target household ID or prefix (defaults to only household if single)
+        #[arg(long)]
+        household: Option<String>,
+    },
+    /// Show household members and shared lists (and reconcile any new lists)
+    Show {
+        /// Target household ID or prefix (defaults to only household if single)
+        #[arg(long)]
+        household: Option<String>,
+    },
+    /// Register an existing local list inside a household
+    AddList {
+        /// Target list ID or prefix (defaults to only list if single)
+        #[arg(short, long)]
+        list: Option<String>,
+        /// Target household ID or prefix (defaults to only household if single)
+        #[arg(long)]
+        household: Option<String>,
     },
 }
 
