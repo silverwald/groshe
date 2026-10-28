@@ -6,7 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use groshe_sync::GrosheSyncNode;
 use groshe_web::{
     create_router, ActivePeerDto, AppState, HouseholdDto, ItemDto, ListDetailDto, ListSummaryDto,
-    NodeStatusDto,
+    NodeStatusDto, RotateListResponseDto,
 };
 use http_body_util::BodyExt;
 use std::sync::Arc;
@@ -544,4 +544,92 @@ async fn test_web_presence_endpoints() {
     assert_eq!(detail.active_peers.len(), 1);
     assert_eq!(detail.active_peers[0].author_name, "Alice (Phone)");
     assert!(detail.active_peers[0].in_store);
+}
+
+#[tokio::test]
+async fn test_web_list_and_household_rotation_endpoints() {
+    let node = Arc::new(GrosheSyncNode::memory().await.unwrap());
+    let (doc, _ticket, old_list_id) = node
+        .create_list_with_meta("Costco Run", "alice")
+        .await
+        .unwrap();
+    let _ = doc.close().await;
+    drop(doc);
+
+    let app = create_router(AppState { node });
+
+    // 1. Create a household (auto-registers `old_list_id`)
+    let hh_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/households")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"name":"Smith Household"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hh_resp.status(), StatusCode::CREATED);
+    let hh_bytes = hh_resp.into_body().collect().await.unwrap().to_bytes();
+    let hh_dto: HouseholdDto = serde_json::from_slice(&hh_bytes).unwrap();
+    assert_eq!(hh_dto.lists.len(), 1);
+    assert_eq!(hh_dto.lists[0].list_id, old_list_id.to_string());
+
+    // 2. Rotate the list via POST /api/lists/:id/rotate
+    let rot_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{old_list_id}/rotate"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rot_resp.status(), StatusCode::OK);
+    let rot_bytes = rot_resp.into_body().collect().await.unwrap().to_bytes();
+    let rot_dto: RotateListResponseDto = serde_json::from_slice(&rot_bytes).unwrap();
+    assert_eq!(rot_dto.old_id, old_list_id.to_string());
+    assert_ne!(rot_dto.new_id, old_list_id.to_string());
+
+    // 3. Verify GET /api/households reflects the archived old list and newly registered rotated list
+    let hh_get = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/households")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let hh_get_bytes = hh_get.into_body().collect().await.unwrap().to_bytes();
+    let hhs: Vec<HouseholdDto> = serde_json::from_slice(&hh_get_bytes).unwrap();
+    assert_eq!(hhs[0].lists.len(), 2);
+    let active_lists: Vec<_> = hhs[0].lists.iter().filter(|l| !l.archived).collect();
+    assert_eq!(active_lists.len(), 1);
+    assert_eq!(active_lists[0].list_id, rot_dto.new_id);
+
+    // 4. Rotate the entire household via POST /api/households/:id/rotate
+    let hh_rot = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/households/{}/rotate", hh_dto.id))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"evicted_authors":[]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hh_rot.status(), StatusCode::OK);
+    let hh_rot_bytes = hh_rot.into_body().collect().await.unwrap().to_bytes();
+    let rotated_hh: HouseholdDto = serde_json::from_slice(&hh_rot_bytes).unwrap();
+    assert_ne!(rotated_hh.id, hh_dto.id);
+    assert_eq!(rotated_hh.name, "Smith Household");
+    assert_eq!(rotated_hh.lists.len(), 1);
 }

@@ -158,3 +158,16 @@ pub struct AddHouseholdListRequest {
     #[serde(default)]
     pub list_id: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RotateListResponseDto {
+    pub old_id: String,
+    pub new_id: String,
+    pub ticket: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RotateHouseholdRequest {
+    #[serde(default)]
+    pub evicted_authors: Vec<String>,
+}

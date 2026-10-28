@@ -26,8 +26,8 @@ use tower_http::cors::{Any, CorsLayer};
 use crate::api::{
     ActivePeerDto, AddHouseholdListRequest, AddItemRequest, CreateHouseholdRequest, HouseholdDto,
     HouseholdListDto, HouseholdMemberDto, ItemDto, JoinHouseholdRequest, ListDetailDto,
-    ListSummaryDto, NodeStatusDto, ReorderItemRequest, ToggleCheckRequest, UpdateItemRequest,
-    UpdatePresenceRequest,
+    ListSummaryDto, NodeStatusDto, ReorderItemRequest, RotateHouseholdRequest,
+    RotateListResponseDto, ToggleCheckRequest, UpdateItemRequest, UpdatePresenceRequest,
 };
 
 #[derive(Clone)]
@@ -86,8 +86,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/households", get(get_households).post(create_household))
         .route("/api/households/join", post(join_household))
         .route("/api/households/:id/lists", post(add_household_list))
+        .route("/api/households/:id/rotate", post(rotate_household_endpoint))
         .route("/api/lists", get(get_lists))
         .route("/api/lists/:id", get(get_list))
+        .route("/api/lists/:id/rotate", post(rotate_list_endpoint))
         .route("/api/lists/:id/presence", post(update_presence))
         .route("/api/lists/:id/items", post(add_item))
         .route("/api/lists/:id/items/:item_id", patch(update_item))
@@ -292,6 +294,45 @@ async fn add_household_list(
 
     let dto = build_household_dto(&state.node, hh_id, &hh_doc).await?;
     Ok((StatusCode::CREATED, Json(dto)))
+}
+
+
+async fn rotate_list_endpoint(
+    State(state): State<AppState>,
+    Path(id_str): Path<String>,
+) -> Result<Json<RotateListResponseDto>, AppError> {
+    let old_ns =
+        NamespaceId::from_str(&id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let author_name = format!("web-{}", &state.node.author_id().to_string()[..6]);
+    let (_new_doc, new_ticket, new_ns) = state
+        .node
+        .rotate_list(old_ns, &author_name)
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    Ok(Json(RotateListResponseDto {
+        old_id: old_ns.to_string(),
+        new_id: new_ns.to_string(),
+        ticket: new_ticket.to_string(),
+    }))
+}
+
+async fn rotate_household_endpoint(
+    State(state): State<AppState>,
+    Path(hh_id_str): Path<String>,
+    Json(req): Json<RotateHouseholdRequest>,
+) -> Result<Json<HouseholdDto>, AppError> {
+    let old_hh_id =
+        NamespaceId::from_str(&hh_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let author_name = format!("web-{}", &state.node.author_id().to_string()[..6]);
+    let (new_hh_doc, _new_ticket, new_hh_id) = state
+        .node
+        .rotate_household(old_hh_id, &author_name, &req.evicted_authors)
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    let dto = build_household_dto(&state.node, new_hh_id, &new_hh_doc).await?;
+    Ok(Json(dto))
 }
 
 async fn get_lists(State(state): State<AppState>) -> Result<Json<Vec<ListSummaryDto>>, AppError> {

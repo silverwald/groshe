@@ -273,6 +273,7 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         <option value="">Loading lists...</option>
       </select>
       <button type="button" id="inStoreBtn" onclick="toggleInStoreMode()" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; white-space: nowrap;">🛒 In-Store: OFF</button>
+      <button type="button" onclick="rotateActiveList()" title="Rotate list capability (auto-updates Household)" style="background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); padding: 10px 12px; border-radius: 8px; cursor: pointer;">🔄 Rotate</button>
     </div>
     <div id="presenceBar" style="display: flex; flex-wrap: wrap; gap: 8px; min-height: 24px; align-items: center;"></div>
 
@@ -695,6 +696,19 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         loadActiveList();
       } catch (err) {
         console.error('Failed to reorder item on drop', err);
+      }
+    }
+
+    async function rotateActiveList() {
+      if (!activeListId) return;
+      if (!confirm('Rotate this list into a new namespace? (If part of a Household, all household members will automatically migrate.)')) return;
+      try {
+        const res = await fetch(`/api/lists/${activeListId}/rotate`, { method: 'POST' });
+        const data = await res.json();
+        activeListId = data.new_id;
+        await init();
+      } catch (e) {
+        console.error('Failed to rotate list', e);
       }
     }
 

@@ -287,6 +287,15 @@ pub enum HouseholdCommands {
         #[arg(long)]
         household: Option<String>,
     },
+    /// Rotate household capability and all member lists, optionally evicting specific members
+    Rotate {
+        /// Target household ID or prefix (defaults to only household if single)
+        #[arg(long)]
+        household: Option<String>,
+        /// Author IDs, prefixes, or display names to evict from the rotated household
+        #[arg(long)]
+        evict: Vec<String>,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]

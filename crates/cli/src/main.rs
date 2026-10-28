@@ -490,6 +490,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                 }
+
+                HouseholdCommands::Rotate { household, evict } => {
+                    let (old_hh_id, hh_doc) = resolve_target_household(&node, household).await?;
+                    let _ = hh_doc.close().await;
+                    drop(hh_doc);
+                    let (_new_hh_doc, new_ticket, new_hh_id) = node
+                        .rotate_household(old_hh_id, &author_name, &evict)
+                        .await?;
+                    let qr = node.render_ticket_qr(&new_ticket)?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "status": "rotated",
+                                "old_id": old_hh_id.to_string(),
+                                "new_id": new_hh_id.to_string(),
+                                "new_ticket": new_ticket.to_string(),
+                                "evicted": evict,
+                            })
+                        );
+                    } else {
+                        println!("Household and all active member lists rotated successfully.");
+                        println!("Old Household ID revoked: {}", old_hh_id);
+                        println!("New Household ID:         {}", new_hh_id);
+                        println!("\nNew Household QR Code:\n{}\n", qr);
+                        println!("New Household Ticket String:\n{}", new_ticket);
+                    }
+                }
             }
             node.shutdown().await?;
         }
