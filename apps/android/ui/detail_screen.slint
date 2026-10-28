@@ -17,6 +17,8 @@ export component DetailScreen inherits Rectangle {
 
     callback toggle_item_check(string /* id */);
     callback edit_item(string /* id */, string /* raw_input */);
+    callback move_item_up(string /* id */);
+    callback move_item_down(string /* id */);
     callback delete_item(string /* id */);
     callback add_item(string /* raw_input */);
     callback trigger_undo();
@@ -177,10 +179,52 @@ export component DetailScreen inherits Rectangle {
                             }
                         }
 
-                        // Actions: Edit & Delete
+                        // Actions: Reorder, Edit & Delete
                         HorizontalLayout {
-                            spacing: 4px;
+                            spacing: 2px;
                             alignment: end;
+
+                            // Move Up button
+                            Rectangle {
+                                width: 36px;
+                                height: Theme.min_touch_target;
+
+                                TouchArea {
+                                    accessible_role: button;
+                                    accessible_label: "Move " + item.name + " up";
+                                    clicked => { root.move_item_up(item.id); }
+                                }
+
+                                Text {
+                                    text: "↑";
+                                    font_size: 16px;
+                                    font_weight: 700;
+                                    color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                                    horizontal_alignment: center;
+                                    vertical_alignment: center;
+                                }
+                            }
+
+                            // Move Down button
+                            Rectangle {
+                                width: 36px;
+                                height: Theme.min_touch_target;
+
+                                TouchArea {
+                                    accessible_role: button;
+                                    accessible_label: "Move " + item.name + " down";
+                                    clicked => { root.move_item_down(item.id); }
+                                }
+
+                                Text {
+                                    text: "↓";
+                                    font_size: 16px;
+                                    font_weight: 700;
+                                    color: dark_mode ? Theme.dark_text_secondary : Theme.light_text_secondary;
+                                    horizontal_alignment: center;
+                                    vertical_alignment: center;
+                                }
+                            }
 
                             // Edit button
                             Rectangle {

@@ -48,6 +48,8 @@ export component AppWindow inherits Window {
     callback toggle_item_check(string /* id */);
     callback delete_item(string /* id */);
     callback edit_item(string /* id */, string /* raw_input */);
+    callback move_item_up(string /* id */);
+    callback move_item_down(string /* id */);
     callback add_item(string /* raw_input */);
     callback trigger_undo();
     callback copy_ticket();
@@ -171,6 +173,8 @@ export component AppWindow inherits Window {
                 toggle_item_check(id) => { root.toggle_item_check(id); }
                 delete_item(id) => { root.delete_item(id); }
                 edit_item(id, input) => { root.edit_item(id, input); }
+                move_item_up(id) => { root.move_item_up(id); }
+                move_item_down(id) => { root.move_item_down(id); }
                 add_item(input) => { root.add_item(input); }
                 trigger_undo() => { root.trigger_undo(); }
                 start_in_store_mode() => { root.active_tab = 2; }

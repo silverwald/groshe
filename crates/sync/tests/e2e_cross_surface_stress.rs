@@ -555,3 +555,200 @@ async fn test_cross_surface_item_edit_convergence() {
     node_a.endpoint().close().await;
     let _ = node_b.shutdown().await;
 }
+#[tokio::test]
+async fn test_cross_surface_item_reorder_convergence() {
+    let tmp_a = tempfile::tempdir().unwrap();
+    let tmp_b = tempfile::tempdir().unwrap();
+
+    let node_a = Arc::new(GrosheSyncNode::persistent(tmp_a.path()).await.unwrap());
+    let node_b = GrosheSyncNode::persistent(tmp_b.path()).await.unwrap();
+
+    let (_doc_a, ticket_a, ns_id) = node_a
+        .create_list_with_meta("Reorder Sync Test", "admin")
+        .await
+        .unwrap();
+    let list_id = ns_to_list_id(&ns_id);
+
+    let doc_b = node_b.import_list(ticket_a.clone()).await.unwrap();
+
+
+
+    let app_state = AppState {
+        node: Arc::clone(&node_a),
+    };
+
+    // 1. Peer A adds 3 items: Apples, Bananas, Carrots via Web Companion REST API
+    let mut item_ids = Vec::new();
+    for name in ["Apples", "Bananas", "Carrots"] {
+        let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+        let payload = serde_json::json!({ "raw_input": name });
+        let resp = http_client
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/lists/{ns_id}/items"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let created: ItemDto = serde_json::from_slice(&bytes).unwrap();
+        item_ids.push(ItemId(uuid::Uuid::parse_str(&created.id).unwrap()));
+    }
+
+    // 2. Wait for full sync to Peer B (all 3 items including data, check, and pos entries)
+    let timeout = Duration::from_secs(25);
+    let start = Instant::now();
+    let mut proj_b = None;
+    while start.elapsed() < timeout {
+        if let Ok(entries) = node_b.get_entries_prefix(&doc_b, "").await {
+            let mut proj = ListProjection::new(list_id);
+            for (k, v) in &entries {
+                let _ = proj.apply_entry(k, v, 0);
+            }
+            // 1 meta + 3 items * 3 entries (data, check, pos) = 10 entries
+            if entries.len() >= 10 && proj.item_count() == 3 {
+                proj_b = Some(proj);
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let proj_b = proj_b.expect("Peer B failed to converge on 3 items with all entries");
+    let sorted_b = proj_b.sorted_items();
+    assert_eq!(sorted_b[0].id, item_ids[0]);
+    assert_eq!(sorted_b[1].id, item_ids[1]);
+    assert_eq!(sorted_b[2].id, item_ids[2]);
+
+    // 3. Peer A reorders Carrots to top via Web Companion REST POST /pos/:id
+    let carrots_id = item_ids[2];
+    let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+    let reorder_payload = serde_json::json!({ "direction": "top" });
+    let resp = http_client
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{ns_id}/pos/{carrots_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(reorder_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // 4. Verify Peer B converges on [Carrots, Apples, Bananas]
+    let start = Instant::now();
+    let mut b_converged = false;
+    while start.elapsed() < Duration::from_secs(25) {
+        if let Ok(entries) = node_b.get_entries_prefix(&doc_b, "").await {
+            let mut proj = ListProjection::new(list_id);
+            for (k, v) in &entries {
+                let _ = proj.apply_entry(k, v, 0);
+            }
+            let sorted = proj.sorted_items();
+            if sorted.len() == 3
+                && sorted[0].id == carrots_id
+                && sorted[1].id == item_ids[0]
+                && sorted[2].id == item_ids[1]
+            {
+                b_converged = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(b_converged, "Peer B timed out waiting for Carrots reorder to top");
+
+    // 5. Concurrently, Peer B moves Bananas between Carrots and Apples
+    // while Peer A checks off Apples
+    let apples_id = item_ids[0];
+    let bananas_id = item_ids[1];
+
+    // Peer B computes position between Carrots and Apples
+    let carrots_pos = {
+        let entries = node_b.get_entries_prefix(&doc_b, "").await.unwrap();
+        let mut proj = ListProjection::new(list_id);
+        for (k, v) in &entries {
+            let _ = proj.apply_entry(k, v, 0);
+        }
+        proj.get_item(&carrots_id).unwrap().position.clone()
+    };
+    let apples_pos = {
+        let entries = node_b.get_entries_prefix(&doc_b, "").await.unwrap();
+        let mut proj = ListProjection::new(list_id);
+        for (k, v) in &entries {
+            let _ = proj.apply_entry(k, v, 0);
+        }
+        proj.get_item(&apples_id).unwrap().position.clone()
+    };
+    let bananas_new_pos = ItemPosition::between(Some(&carrots_pos), Some(&apples_pos)).unwrap();
+
+    node_b
+        .set_entry(
+            &doc_b,
+            DocKey::item_pos(bananas_id).to_key_bytes(),
+            to_cbor(&bananas_new_pos).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Peer A checks off Apples via REST POST
+    let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+    let check_payload = serde_json::json!({ "checked": true });
+    let resp = http_client
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{ns_id}/check/{apples_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(check_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // 6. Verify convergence on both peers:
+    // Unchecked items: Carrots, Bananas
+    // Checked items: Apples
+    let start = Instant::now();
+    let mut web_converged = false;
+    while start.elapsed() < Duration::from_secs(25) {
+        let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+        let resp = http_client
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/lists/{ns_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if resp.status() == StatusCode::OK {
+            let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+            if let Ok(detail) = serde_json::from_slice::<ListDetailDto>(&body_bytes) {
+                if detail.items.len() == 3
+                    && detail.items[0].id == carrots_id.to_string()
+                    && !detail.items[0].checked
+                    && detail.items[1].id == bananas_id.to_string()
+                    && !detail.items[1].checked
+                    && detail.items[2].id == apples_id.to_string()
+                    && detail.items[2].checked
+                {
+                    web_converged = true;
+                    break;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(web_converged, "Peer A (Web Companion) timed out waiting for concurrent reorder & check convergence");
+
+    node_a.endpoint().close().await;
+    let _ = node_b.shutdown().await;
+}
