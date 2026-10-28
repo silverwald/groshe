@@ -13,10 +13,13 @@ pub mod schema;
 // Re-export common domain types for ergonomic workspace usage
 pub use error::CoreError;
 pub use export::{hex_32, parse_hex_32, ExportItem, ExportList};
-pub use model::{ItemCheck, ItemData, ItemId, ListId, ListMeta};
+pub use model::{
+    HouseholdId, HouseholdListRef, HouseholdMember, HouseholdMeta, ItemCheck, ItemData, ItemId,
+    ListId, ListMeta,
+};
 pub use parser::{parse_quick_add, suggest_category, ParsedItem};
 pub use position::{between_strings, ItemPosition};
-pub use schema::{from_cbor, to_cbor, DocKey};
+pub use schema::{from_cbor, to_cbor, DocKey, HouseholdDocKey};
 
 #[cfg(test)]
 mod tests {

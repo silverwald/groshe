@@ -106,6 +106,86 @@ impl FromStr for DocKey {
     }
 }
 
+
+/// Canonical key structure for iroh-docs entries in a household document per §11.
+///
+/// - `household/meta` -> Household name, schema version, creation info
+/// - `household/members/<author_id>` -> Member display name and join timestamp
+/// - `household/lists/<list_id>` -> Shared list reference and DocTicket
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum HouseholdDocKey {
+    /// Household-wide metadata stored at `household/meta`.
+    Meta,
+    /// Household member entry stored at `household/members/<author_id>`.
+    Member(String),
+    /// Household list reference stored at `household/lists/<list_id>`.
+    List(String),
+}
+
+impl HouseholdDocKey {
+    pub const META_KEY: &'static str = "household/meta";
+
+    /// Constructs a `Member` key.
+    pub fn member(author_id: impl Into<String>) -> Self {
+        Self::Member(author_id.into())
+    }
+
+    /// Constructs a `List` key.
+    pub fn list(list_id: impl Into<String>) -> Self {
+        Self::List(list_id.into())
+    }
+
+    /// Renders the canonical ASCII string key for iroh-docs entry storage.
+    pub fn to_key_string(&self) -> String {
+        match self {
+            Self::Meta => Self::META_KEY.to_string(),
+            Self::Member(author_id) => format!("household/members/{author_id}"),
+            Self::List(list_id) => format!("household/lists/{list_id}"),
+        }
+    }
+
+    /// Converts the key to a byte vector.
+    pub fn to_key_bytes(&self) -> Vec<u8> {
+        self.to_key_string().into_bytes()
+    }
+
+    /// Parses an iroh-docs household key from a byte slice.
+    pub fn parse_bytes(bytes: &[u8]) -> Result<Self, CoreError> {
+        let s = std::str::from_utf8(bytes)
+            .map_err(|e| CoreError::InvalidKey(format!("Household key is not valid UTF-8: {e}")))?;
+        Self::from_str(s)
+    }
+}
+
+impl fmt::Display for HouseholdDocKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_key_string())
+    }
+}
+
+impl FromStr for HouseholdDocKey {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == Self::META_KEY || s == "meta" {
+            return Ok(Self::Meta);
+        }
+
+        let parts: Vec<&str> = s.split('/').collect();
+        match parts.as_slice() {
+            ["household", "members", id] | ["members", id] if !id.trim().is_empty() => {
+                Ok(Self::Member(id.to_string()))
+            }
+            ["household", "lists", id] | ["lists", id] if !id.trim().is_empty() => {
+                Ok(Self::List(id.to_string()))
+            }
+            _ => Err(CoreError::InvalidKey(format!(
+                "Unrecognized household key format: '{s}'"
+            ))),
+        }
+    }
+}
+
 /// Encodes a value into canonical CBOR bytes.
 pub fn to_cbor<T: Serialize>(value: &T) -> Result<Vec<u8>, CoreError> {
     let mut buf = Vec::new();

@@ -10,6 +10,15 @@ pub enum CoreError {
     #[error("List title cannot be empty")]
     EmptyListTitle,
 
+    #[error("Household name cannot be empty")]
+    EmptyHouseholdName,
+
+    #[error("Household member name cannot be empty")]
+    EmptyMemberName,
+
+    #[error("Sharing ticket cannot be empty")]
+    EmptyTicket,
+
     #[error("Invalid quantity: must be positive")]
     InvalidQuantity,
 

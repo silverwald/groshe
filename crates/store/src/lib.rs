@@ -11,7 +11,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
-use groshe_core::{from_cbor, CoreError, DocKey, ItemCheck, ItemData, ItemId, ItemPosition, ListId, ListMeta};
+use groshe_core::{
+    from_cbor, CoreError, DocKey, HouseholdDocKey, HouseholdId, HouseholdListRef, HouseholdMember,
+    HouseholdMeta, ItemCheck, ItemData, ItemId, ItemPosition, ListId, ListMeta,
+};
 use thiserror::Error;
 
 pub mod history;
@@ -372,6 +375,135 @@ impl ListProjection {
     }
 }
 
+
+/// In-memory materialized projection of a household document per §11.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HouseholdProjection {
+    pub id: HouseholdId,
+    pub meta: Option<HouseholdMeta>,
+    pub meta_updated_at: u64,
+    pub members: BTreeMap<String, (HouseholdMember, u64)>,
+    pub lists: BTreeMap<String, (HouseholdListRef, u64)>,
+}
+
+impl HouseholdProjection {
+    pub fn new(id: HouseholdId) -> Self {
+        Self {
+            id,
+            meta: None,
+            meta_updated_at: 0,
+            members: BTreeMap::new(),
+            lists: BTreeMap::new(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.meta
+            .as_ref()
+            .map(|m| m.name.as_str())
+            .unwrap_or("Untitled Household")
+    }
+
+    /// Returns all active household members sorted by join timestamp ascending.
+    pub fn members(&self) -> Vec<&HouseholdMember> {
+        let mut list: Vec<&HouseholdMember> = self.members.values().map(|(m, _)| m).collect();
+        list.sort_by(|a, b| {
+            a.joined_at
+                .cmp(&b.joined_at)
+                .then_with(|| a.author_id.cmp(&b.author_id))
+        });
+        list
+    }
+
+    /// Returns non-archived household list references sorted by creation timestamp ascending.
+    pub fn active_lists(&self) -> Vec<&HouseholdListRef> {
+        let mut list: Vec<&HouseholdListRef> = self
+            .lists
+            .values()
+            .map(|(l, _)| l)
+            .filter(|l| !l.archived)
+            .collect();
+        list.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.list_id.cmp(&b.list_id))
+        });
+        list
+    }
+
+    /// Returns archived household list references sorted by creation timestamp ascending.
+    pub fn archived_lists(&self) -> Vec<&HouseholdListRef> {
+        let mut list: Vec<&HouseholdListRef> = self
+            .lists
+            .values()
+            .map(|(l, _)| l)
+            .filter(|l| l.archived)
+            .collect();
+        list.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.list_id.cmp(&b.list_id))
+        });
+        list
+    }
+
+    /// Applies a raw household document entry (`household/meta`, `household/members/<id>`, `household/lists/<id>`)
+    /// with Last-Writer-Wins (LWW) conflict resolution.
+    pub fn apply_entry(
+        &mut self,
+        key_bytes: &[u8],
+        value_bytes: &[u8],
+        timestamp: u64,
+    ) -> Result<bool, StoreError> {
+        let doc_key = HouseholdDocKey::parse_bytes(key_bytes)?;
+        match doc_key {
+            HouseholdDocKey::Meta => {
+                if value_bytes.is_empty() {
+                    if timestamp >= self.meta_updated_at {
+                        self.meta = None;
+                        self.meta_updated_at = timestamp;
+                        return Ok(true);
+                    }
+                    return Ok(false);
+                }
+                if timestamp >= self.meta_updated_at {
+                    let meta: HouseholdMeta = from_cbor(value_bytes)?;
+                    self.meta = Some(meta);
+                    self.meta_updated_at = timestamp;
+                    return Ok(true);
+                }
+                Ok(false)
+            }
+            HouseholdDocKey::Member(author_id) => {
+                let current_ts = self.members.get(&author_id).map(|(_, ts)| *ts).unwrap_or(0);
+                if timestamp < current_ts {
+                    return Ok(false);
+                }
+                if value_bytes.is_empty() {
+                    self.members.remove(&author_id);
+                    return Ok(true);
+                }
+                let member: HouseholdMember = from_cbor(value_bytes)?;
+                self.members.insert(author_id, (member, timestamp));
+                Ok(true)
+            }
+            HouseholdDocKey::List(list_id) => {
+                let current_ts = self.lists.get(&list_id).map(|(_, ts)| *ts).unwrap_or(0);
+                if timestamp < current_ts {
+                    return Ok(false);
+                }
+                if value_bytes.is_empty() {
+                    self.lists.remove(&list_id);
+                    return Ok(true);
+                }
+                let list_ref: HouseholdListRef = from_cbor(value_bytes)?;
+                self.lists.insert(list_id, (list_ref, timestamp));
+                Ok(true)
+            }
+        }
+    }
+}
+
 /// Thread-safe reactive store managing multiple list projections with event broadcasting.
 #[derive(Clone)]
 pub struct ReactiveStore {
@@ -664,5 +796,76 @@ mod tests {
         // On another list where Oat Milk is not active, it should be suggested!
         assert_eq!(suggestions_other.len(), 1);
         assert_eq!(suggestions_other[0].display_name, "Oat Milk");
+    }
+
+    #[test]
+    fn test_household_projection_lww_and_filtering() {
+        let hh_id = HouseholdId::new_v7();
+        let mut proj = HouseholdProjection::new(hh_id);
+        assert_eq!(proj.name(), "Untitled Household");
+
+        // 1. Apply HouseholdMeta
+        let meta = HouseholdMeta::new("Smith Family", "author-alice", 100).unwrap();
+        proj.apply_entry(
+            &HouseholdDocKey::Meta.to_key_bytes(),
+            &to_cbor(&meta).unwrap(),
+            100,
+        )
+        .unwrap();
+        assert_eq!(proj.name(), "Smith Family");
+
+        // Reject older meta update
+        let stale_meta = HouseholdMeta::new("Old Family", "author-alice", 50).unwrap();
+        let updated = proj
+            .apply_entry(
+                &HouseholdDocKey::Meta.to_key_bytes(),
+                &to_cbor(&stale_meta).unwrap(),
+                50,
+            )
+            .unwrap();
+        assert!(!updated);
+        assert_eq!(proj.name(), "Smith Family");
+
+        // 2. Add members
+        let alice = HouseholdMember::new("author-alice", "Alice", 100).unwrap();
+        let bob = HouseholdMember::new("author-bob", "Bob", 110).unwrap();
+        proj.apply_entry(
+            &HouseholdDocKey::member("author-alice").to_key_bytes(),
+            &to_cbor(&alice).unwrap(),
+            100,
+        )
+        .unwrap();
+        proj.apply_entry(
+            &HouseholdDocKey::member("author-bob").to_key_bytes(),
+            &to_cbor(&bob).unwrap(),
+            110,
+        )
+        .unwrap();
+        assert_eq!(proj.members().len(), 2);
+        assert_eq!(proj.members()[0].display_name, "Alice");
+        assert_eq!(proj.members()[1].display_name, "Bob");
+
+        // 3. Add lists (one active, one archived)
+        let weekly = HouseholdListRef::new("list-1", "Weekly Groceries", "ticket-1", 120).unwrap();
+        let holiday = HouseholdListRef::new("list-2", "Thanksgiving", "ticket-2", 130)
+            .unwrap()
+            .with_archived(true);
+        proj.apply_entry(
+            &HouseholdDocKey::list("list-1").to_key_bytes(),
+            &to_cbor(&weekly).unwrap(),
+            120,
+        )
+        .unwrap();
+        proj.apply_entry(
+            &HouseholdDocKey::list("list-2").to_key_bytes(),
+            &to_cbor(&holiday).unwrap(),
+            130,
+        )
+        .unwrap();
+
+        assert_eq!(proj.active_lists().len(), 1);
+        assert_eq!(proj.active_lists()[0].name, "Weekly Groceries");
+        assert_eq!(proj.archived_lists().len(), 1);
+        assert_eq!(proj.archived_lists()[0].name, "Thanksgiving");
     }
 }

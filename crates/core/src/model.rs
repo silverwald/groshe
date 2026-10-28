@@ -217,3 +217,158 @@ impl ItemCheck {
         }
     }
 }
+
+/// Unique ID for a household document (UUIDv7, time-ordered).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct HouseholdId(pub Uuid);
+
+impl HouseholdId {
+    /// Generate a new time-ordered UUIDv7 household identifier.
+    pub fn new_v7() -> Self {
+        Self(Uuid::now_v7())
+    }
+
+    /// Access the underlying inner UUID.
+    pub fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl Default for HouseholdId {
+    fn default() -> Self {
+        Self::new_v7()
+    }
+}
+
+impl fmt::Display for HouseholdId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for HouseholdId {
+    type Err = CoreError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(s)
+            .map(Self)
+            .map_err(|e| CoreError::InvalidUuid(format!("Invalid HouseholdId '{s}': {e}")))
+    }
+}
+
+/// Metadata stored at `household/meta` in a household document per §11.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HouseholdMeta {
+    pub schema_version: u32,
+    pub name: String,
+    pub created_at: u64,
+    pub created_by: String,
+}
+
+impl HouseholdMeta {
+    pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+
+    /// Creates a new validated `HouseholdMeta` instance.
+    pub fn new(
+        name: impl Into<String>,
+        created_by: impl Into<String>,
+        created_at: u64,
+    ) -> Result<Self, CoreError> {
+        let name = name.into();
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(CoreError::EmptyHouseholdName);
+        }
+
+        Ok(Self {
+            schema_version: Self::CURRENT_SCHEMA_VERSION,
+            name: trimmed.to_string(),
+            created_at,
+            created_by: created_by.into(),
+        })
+    }
+}
+
+/// Member record stored at `household/members/<author_id>` in a household document per §11.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HouseholdMember {
+    pub author_id: String,
+    pub display_name: String,
+    pub joined_at: u64,
+}
+
+impl HouseholdMember {
+    /// Creates a new validated `HouseholdMember` record.
+    pub fn new(
+        author_id: impl Into<String>,
+        display_name: impl Into<String>,
+        joined_at: u64,
+    ) -> Result<Self, CoreError> {
+        let author_id = author_id.into();
+        let author_trimmed = author_id.trim();
+        if author_trimmed.is_empty() {
+            return Err(CoreError::EmptyMemberName);
+        }
+        let display_name = display_name.into();
+        let name_trimmed = display_name.trim();
+        if name_trimmed.is_empty() {
+            return Err(CoreError::EmptyMemberName);
+        }
+
+        Ok(Self {
+            author_id: author_trimmed.to_string(),
+            display_name: name_trimmed.to_string(),
+            joined_at,
+        })
+    }
+}
+
+/// Shared list reference stored at `household/lists/<list_id>` in a household document per §11.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HouseholdListRef {
+    pub list_id: String,
+    pub name: String,
+    pub ticket: String,
+    pub archived: bool,
+    pub created_at: u64,
+}
+
+impl HouseholdListRef {
+    /// Creates a new validated `HouseholdListRef` record.
+    pub fn new(
+        list_id: impl Into<String>,
+        name: impl Into<String>,
+        ticket: impl Into<String>,
+        created_at: u64,
+    ) -> Result<Self, CoreError> {
+        let list_id = list_id.into();
+        let id_trimmed = list_id.trim();
+        if id_trimmed.is_empty() {
+            return Err(CoreError::InvalidKey("List ID cannot be empty".to_string()));
+        }
+        let name = name.into();
+        let name_trimmed = name.trim();
+        if name_trimmed.is_empty() {
+            return Err(CoreError::EmptyListTitle);
+        }
+        let ticket = ticket.into();
+        let ticket_trimmed = ticket.trim();
+        if ticket_trimmed.is_empty() {
+            return Err(CoreError::EmptyTicket);
+        }
+
+        Ok(Self {
+            list_id: id_trimmed.to_string(),
+            name: name_trimmed.to_string(),
+            ticket: ticket_trimmed.to_string(),
+            archived: false,
+            created_at,
+        })
+    }
+
+    /// Sets the archived flag on this list reference.
+    pub fn with_archived(mut self, archived: bool) -> Self {
+        self.archived = archived;
+        self
+    }
+}
