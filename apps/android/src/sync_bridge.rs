@@ -43,6 +43,7 @@ pub enum SyncCommand {
     PruneTombstones,
     ExportActiveListMarkdown,
     ExportActiveListJson,
+    SetPresence { in_store: bool },
 }
 
 /// Thread-safe handle for sending sync commands from Slint callbacks.
@@ -100,6 +101,23 @@ fn projection_to_slint_items(proj: &ListProjection) -> Vec<GroceryItemData> {
         .collect()
 }
 
+fn format_active_peers_summary(peers: &[groshe_sync::ActivePeerPresence]) -> String {
+    if peers.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = peers
+        .iter()
+        .map(|p| {
+            if p.in_store {
+                format!("🛒 {} shopping now", p.author_name)
+            } else {
+                format!("● {} viewing", p.author_name)
+            }
+        })
+        .collect();
+    parts.join("  •  ")
+}
+
 async fn load_lists_info(node: &GrosheSyncNode) -> Vec<GroceryListInfo> {
     let _ = node.reconcile_all_households().await;
     let ids = node.list_ids().await.unwrap_or_default();
@@ -115,12 +133,20 @@ async fn load_lists_info(node: &GrosheSyncNode) -> Vec<GroceryListInfo> {
             let proj = load_projection(node, &doc, list_id)
                 .await
                 .unwrap_or_else(|_| ListProjection::new(list_id));
+            let active_peers = node.active_peers(&id).await.unwrap_or_default();
+            let peer_status = if let Some(shopper) = active_peers.iter().find(|p| p.in_store) {
+                format!("🛒 {} shopping", shopper.author_name)
+            } else if !active_peers.is_empty() {
+                format!("● {} active", active_peers.len())
+            } else {
+                "Online".to_string()
+            };
             list_infos.push(GroceryListInfo {
                 id: id.to_string().into(),
                 title: title.into(),
                 item_count: proj.item_count() as i32,
                 checked_count: proj.checked_count() as i32,
-                peer_status: "Online".into(),
+                peer_status: peer_status.into(),
                 is_online: true,
             });
         }
@@ -233,6 +259,10 @@ pub fn spawn_sync_bridge(
             app.set_frequent_suggestions(ModelRc::new(VecModel::from(initial_suggestions)));
             app.set_lists(ModelRc::new(VecModel::from(initial_lists)));
         });
+
+        let mut in_store_mode = false;
+        let _ = node.announce_presence(&active_ns_id, &author_name, in_store_mode).await;
+        let mut presence_interval = tokio::time::interval(std::time::Duration::from_secs(15));
 
         // Main event loop
         loop {
@@ -700,7 +730,30 @@ pub fn spawn_sync_bridge(
                                 app.set_show_export_status(true);
                             });
                         }
+
+                        SyncCommand::SetPresence { in_store } => {
+                            in_store_mode = in_store;
+                            let _ = node.announce_presence(&active_ns_id, &author_name, in_store_mode).await;
+                            let peers = node.active_peers(&active_ns_id).await.unwrap_or_default();
+                            let summary = format_active_peers_summary(&peers);
+                            let count = peers.len() as i32;
+                            let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                app.set_active_peers_summary(summary.into());
+                                app.set_peer_count(count);
+                            });
+                        }
                     }
+                }
+
+                _ = presence_interval.tick() => {
+                    let _ = node.announce_presence(&active_ns_id, &author_name, in_store_mode).await;
+                    let peers = node.active_peers(&active_ns_id).await.unwrap_or_default();
+                    let summary = format_active_peers_summary(&peers);
+                    let count = peers.len() as i32;
+                    let _ = app_weak.upgrade_in_event_loop(move |app| {
+                        app.set_active_peers_summary(summary.into());
+                        app.set_peer_count(count);
+                    });
                 }
 
                 // Handle incoming remote sync events over QUIC / live Iroh doc stream
@@ -716,9 +769,14 @@ pub fn spawn_sync_bridge(
                             current_proj = p;
                             let items = projection_to_slint_items(&current_proj);
                             let lists = load_lists_info(&node).await;
+                            let peers = node.active_peers(&active_ns_id).await.unwrap_or_default();
+                            let summary = format_active_peers_summary(&peers);
+                            let count = peers.len() as i32;
                             let _ = app_weak.upgrade_in_event_loop(move |app| {
                                 app.set_items(ModelRc::new(VecModel::from(items)));
                                 app.set_lists(ModelRc::new(VecModel::from(lists)));
+                                app.set_active_peers_summary(summary.into());
+                                app.set_peer_count(count);
                             });
                         }
                     }

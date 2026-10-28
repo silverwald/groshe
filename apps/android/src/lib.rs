@@ -103,6 +103,11 @@ pub fn setup_app_window(app: &AppWindow, sync_handle: sync_bridge::SyncBridgeHan
         sh.send(sync_bridge::SyncCommand::ExportActiveListJson);
     });
 
+    let sh = sync_handle.clone();
+    app.on_set_in_store_mode(move |in_store| {
+        sh.send(sync_bridge::SyncCommand::SetPresence { in_store });
+    });
+
     let app_weak = app.as_weak();
     app.on_copy_ticket(move || {
         if let Some(app) = app_weak.upgrade() {

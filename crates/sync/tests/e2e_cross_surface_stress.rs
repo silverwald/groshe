@@ -752,3 +752,120 @@ async fn test_cross_surface_item_reorder_convergence() {
     node_a.endpoint().close().await;
     let _ = node_b.shutdown().await;
 }
+
+#[tokio::test]
+async fn test_cross_surface_household_and_live_presence_convergence() {
+    let tmp_a = tempfile::tempdir().unwrap();
+    let tmp_b = tempfile::tempdir().unwrap();
+
+    let node_a = Arc::new(GrosheSyncNode::persistent(tmp_a.path()).await.unwrap());
+    let node_b = GrosheSyncNode::persistent(tmp_b.path()).await.unwrap();
+
+    let app_state = AppState {
+        node: Arc::clone(&node_a),
+    };
+
+    // 1. Peer A creates a Household via Web Companion POST /api/households
+    let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+    let create_hh_payload = serde_json::json!({ "name": "Groshe Family" });
+    let resp = http_client
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/households")
+                .header("content-type", "application/json")
+                .body(Body::from(create_hh_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let hh_dto: groshe_web::HouseholdDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(hh_dto.name, "Groshe Family");
+
+    // 2. Peer A creates a shared list inside the Household via POST /api/households/:id/lists
+    let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+    let add_list_payload = serde_json::json!({ "title": "Saturday Farmers Market" });
+    let resp = http_client
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/households/{}/lists", hh_dto.id))
+                .header("content-type", "application/json")
+                .body(Body::from(add_list_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let hh_dto: groshe_web::HouseholdDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(hh_dto.lists.len(), 1);
+    let market_list_id_str = hh_dto.lists[0].list_id.clone();
+
+    // 3. Peer B (Mobile/CLI) joins the Household using ONLY the Household ticket and auto-discovers the list
+    let (hh_doc_b, _, _) = node_b
+        .join_household(&hh_dto.ticket, "Bob (Mobile)")
+        .await
+        .unwrap();
+
+    let timeout = Duration::from_secs(25);
+    let start = Instant::now();
+    let mut discovered_ns = None;
+    while start.elapsed() < timeout {
+        let _ = node_b.reconcile_household_lists(&hh_doc_b).await;
+        if let Ok(ids) = node_b.list_ids().await {
+            if let Some(found) = ids.into_iter().find(|id| id.to_string() == market_list_id_str) {
+                discovered_ns = Some(found);
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let market_ns = discovered_ns.expect("Peer B failed to auto-discover household list");
+
+    // 4. Peer B enters In-Store shopping mode on the discovered list and announces presence
+    node_b
+        .announce_presence(&market_ns, "Bob (Mobile)", true)
+        .await
+        .unwrap();
+
+    // 5. Verify Peer A's Web Companion GET /api/lists/:id converges on Bob's live in-store presence
+    let start = Instant::now();
+    let mut presence_converged = false;
+    while start.elapsed() < timeout {
+        let http_client = tower::ServiceBuilder::new().service(create_router(app_state.clone()));
+        let resp = http_client
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/lists/{market_list_id_str}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if resp.status() == StatusCode::OK {
+            let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+            if let Ok(detail) = serde_json::from_slice::<ListDetailDto>(&body_bytes) {
+                if detail
+                    .active_peers
+                    .iter()
+                    .any(|p| p.author_name == "Bob (Mobile)" && p.in_store)
+                {
+                    presence_converged = true;
+                    break;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        presence_converged,
+        "Peer A Web Companion failed to converge on Peer B live in-store presence"
+    );
+
+    node_a.endpoint().close().await;
+    let _ = node_b.shutdown().await;
+}

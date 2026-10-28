@@ -4,6 +4,7 @@ import { Theme, GroceryItemData } from "theme.slint";
 export component DetailScreen inherits Rectangle {
     in property <bool> dark_mode: true;
     in property <string> list_title: "Groceries";
+    in property <string> active_peers_summary: "";
     in property <[GroceryItemData]> items: [];
     in property <bool> show_undo_toast: false;
     in property <string> undo_toast_message: "";
@@ -52,6 +53,25 @@ export component DetailScreen inherits Rectangle {
                     font_size: 15px;
                     font_weight: 700;
                     color: #ffffff;
+                    vertical_alignment: center;
+                }
+            }
+        }
+
+        if root.active_peers_summary != "" : Rectangle {
+            height: 32px;
+            background: dark_mode ? #1b3a1e : #e8f5e9;
+
+            HorizontalLayout {
+                padding_left: 16px;
+                padding_right: 16px;
+                alignment: start;
+
+                Text {
+                    text: root.active_peers_summary;
+                    font_size: 12px;
+                    font_weight: 600;
+                    color: dark_mode ? #a5d6a7 : #1b5e20;
                     vertical_alignment: center;
                 }
             }
