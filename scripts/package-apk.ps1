@@ -59,7 +59,7 @@ Copy-Item $soPath "$stage/lib/$Target/libgroshe_android.so"
 
 # 5. Link base APK with AndroidManifest.xml
 Write-Host "Compiling manifest with aapt2 link..." -ForegroundColor Yellow
-& $aapt2 link -o "$stage/base.zip" -I $androidJar --manifest $manifest
+& $aapt2 link -o "$stage/base.zip" -I $androidJar --manifest $manifest --min-sdk-version 26 --target-sdk-version 34 --version-code 1 --version-name 0.1.0
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
 
 # 6. Add native libraries into base.zip
