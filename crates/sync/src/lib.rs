@@ -13,7 +13,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use groshe_core::{from_cbor, to_cbor, DocKey, ListId, ListMeta};
+use groshe_core::{
+    from_cbor, to_cbor, DocKey, HouseholdDocKey, HouseholdListRef, HouseholdMember, HouseholdMeta,
+    ListId, ListMeta,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -429,7 +432,15 @@ impl GrosheSyncNode {
             .map_err(|e| SyncError::Doc(e.to_string()))
     }
 
-    /// List all local document NamespaceIds.
+    /// Checks whether a document is a Household document (has a `household/meta` entry).
+    pub async fn is_household_doc(&self, doc: &Doc) -> Result<bool, SyncError> {
+        Ok(self
+            .get_entry(doc, HouseholdDocKey::Meta.to_key_bytes())
+            .await?
+            .is_some())
+    }
+
+    /// List all local grocery list document NamespaceIds (excluding Household documents).
     pub async fn list_ids(&self) -> Result<Vec<NamespaceId>, SyncError> {
         let stream = self
             .docs
@@ -440,11 +451,229 @@ impl GrosheSyncNode {
         tokio::pin!(stream);
         while let Some(res) = stream.next().await {
             match res {
-                Ok((id, _state)) => list.push(id),
+                Ok((id, _state)) => {
+                    let is_hh = if let Ok(Some(doc)) = self.open_list(id).await {
+                        self.is_household_doc(&doc).await.unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    if !is_hh {
+                        list.push(id);
+                    }
+                }
                 Err(e) => return Err(SyncError::Doc(e.to_string())),
             }
         }
         Ok(list)
+    }
+
+    /// List all local Household document NamespaceIds.
+    pub async fn household_ids(&self) -> Result<Vec<NamespaceId>, SyncError> {
+        let stream = self
+            .docs
+            .list()
+            .await
+            .map_err(|e| SyncError::Doc(e.to_string()))?;
+        let mut households = Vec::new();
+        tokio::pin!(stream);
+        while let Some(res) = stream.next().await {
+            match res {
+                Ok((id, _state)) => {
+                    if let Ok(Some(doc)) = self.open_list(id).await {
+                        if self.is_household_doc(&doc).await.unwrap_or(false) {
+                            households.push(id);
+                        }
+                    }
+                }
+                Err(e) => return Err(SyncError::Doc(e.to_string())),
+            }
+        }
+        Ok(households)
+    }
+
+    /// Creates a new Household document initialized with `household/meta` and the creator's member entry (§11).
+    pub async fn create_household(
+        &self,
+        name: &str,
+        author_name: &str,
+    ) -> Result<(Doc, DocTicket, NamespaceId), SyncError> {
+        let (doc, ticket) = self.create_list().await?;
+        let ns_id = doc.id();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let meta = HouseholdMeta::new(name, author_name, now)?;
+        self.set_entry(&doc, HouseholdDocKey::Meta.to_key_bytes(), to_cbor(&meta)?)
+            .await?;
+
+        let author_str = self.author_id.to_string();
+        let member = HouseholdMember::new(&author_str, author_name, now)?;
+        self.set_entry(
+            &doc,
+            HouseholdDocKey::member(&author_str).to_key_bytes(),
+            to_cbor(&member)?,
+        )
+        .await?;
+
+        Ok((doc, ticket, ns_id))
+    }
+
+    /// Joins an existing Household document from a sharing ticket, registers the local member,
+    /// and reconciles any active household lists (§11).
+    pub async fn join_household(
+        &self,
+        ticket_str: &str,
+        author_name: &str,
+    ) -> Result<(Doc, DocTicket, NamespaceId), SyncError> {
+        let (doc, ticket) = self.import_list_str(ticket_str).await?;
+        let ns_id = doc.id();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let author_str = self.author_id.to_string();
+        let member = HouseholdMember::new(&author_str, author_name, now)?;
+        self.set_entry(
+            &doc,
+            HouseholdDocKey::member(&author_str).to_key_bytes(),
+            to_cbor(&member)?,
+        )
+        .await?;
+
+        let _ = self.reconcile_household_lists(&doc).await;
+        Ok((doc, ticket, ns_id))
+    }
+
+    /// Registers a grocery list inside a Household document so all household members auto-discover it.
+    pub async fn register_list_in_household(
+        &self,
+        household_doc: &Doc,
+        list_doc: &Doc,
+        list_name: &str,
+    ) -> Result<HouseholdListRef, SyncError> {
+        let ticket = self.share_ticket(list_doc).await?;
+        let list_id_str = list_doc.id().to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let list_ref = HouseholdListRef::new(&list_id_str, list_name, ticket.to_string(), now)?;
+        self.set_entry(
+            household_doc,
+            HouseholdDocKey::list(&list_id_str).to_key_bytes(),
+            to_cbor(&list_ref)?,
+        )
+        .await?;
+        Ok(list_ref)
+    }
+
+    /// Reads and deserializes the `household/meta` entry of a Household document.
+    pub async fn get_household_meta(&self, doc: &Doc) -> Result<Option<HouseholdMeta>, SyncError> {
+        if let Some(bytes) = self
+            .get_entry(doc, HouseholdDocKey::Meta.to_key_bytes())
+            .await?
+        {
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            let meta: HouseholdMeta = from_cbor(&bytes)?;
+            Ok(Some(meta))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Reads all active members registered in a Household document.
+    pub async fn get_household_members(&self, doc: &Doc) -> Result<Vec<HouseholdMember>, SyncError> {
+        let entries = self.get_entries_prefix(doc, "household/members/").await?;
+        let mut members = Vec::new();
+        for (_k, v) in entries {
+            if !v.is_empty() {
+                if let Ok(m) = from_cbor::<HouseholdMember>(&v) {
+                    members.push(m);
+                }
+            }
+        }
+        members.sort_by(|a, b| {
+            a.joined_at
+                .cmp(&b.joined_at)
+                .then_with(|| a.author_id.cmp(&b.author_id))
+        });
+        Ok(members)
+    }
+
+    /// Reads all list references registered in a Household document.
+    pub async fn get_household_lists(&self, doc: &Doc) -> Result<Vec<HouseholdListRef>, SyncError> {
+        let entries = self.get_entries_prefix(doc, "household/lists/").await?;
+        let mut lists = Vec::new();
+        for (_k, v) in entries {
+            if !v.is_empty() {
+                if let Ok(l) = from_cbor::<HouseholdListRef>(&v) {
+                    lists.push(l);
+                }
+            }
+        }
+        lists.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.list_id.cmp(&b.list_id))
+        });
+        Ok(lists)
+    }
+
+    /// Automatically imports and subscribes to any non-archived lists referenced in `household_doc`
+    /// that are not yet present in local storage. Returns the newly imported list `NamespaceId`s.
+    pub async fn reconcile_household_lists(
+        &self,
+        household_doc: &Doc,
+    ) -> Result<Vec<NamespaceId>, SyncError> {
+        let list_refs = self.get_household_lists(household_doc).await?;
+        let existing_ids = self.list_ids().await?;
+        let mut newly_joined = Vec::new();
+
+        for lref in list_refs {
+            if lref.archived {
+                continue;
+            }
+            let target_ns = NamespaceId::from_str(&lref.list_id).ok().or_else(|| {
+                DocTicket::from_str(&lref.ticket)
+                    .ok()
+                    .map(|t| t.capability.id())
+            });
+            let Some(ns_id) = target_ns else {
+                continue;
+            };
+
+            if !existing_ids.contains(&ns_id) {
+                if let Ok((doc, _ticket)) = self.import_list_str(&lref.ticket).await {
+                    newly_joined.push(doc.id());
+                }
+            } else if let Ok(ticket) = DocTicket::from_str(&lref.ticket) {
+                if let Ok(Some(doc)) = self.open_list(ns_id).await {
+                    let _ = self.join_ticket(&doc, &ticket).await;
+                }
+            }
+        }
+
+        Ok(newly_joined)
+    }
+
+    /// Reconciles all local Household documents, importing any newly discovered shared lists.
+    pub async fn reconcile_all_households(&self) -> Result<Vec<NamespaceId>, SyncError> {
+        let hh_ids = self.household_ids().await?;
+        let mut all_new = Vec::new();
+        for hh_id in hh_ids {
+            if let Ok(Some(hh_doc)) = self.open_list(hh_id).await {
+                if let Ok(mut new_ids) = self.reconcile_household_lists(&hh_doc).await {
+                    all_new.append(&mut new_ids);
+                }
+            }
+        }
+        Ok(all_new)
     }
 
     /// Delete an entry or key prefix in a document using the node's author identity.
@@ -732,5 +961,66 @@ relay_url = "disabled"
         let (doc, ticket) = node.create_list().await.unwrap();
         assert_eq!(ticket.capability.id(), doc.id());
         node.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_household_lifecycle_and_reconciliation() {
+        let node_a = GrosheSyncNode::memory().await.unwrap();
+        let node_b = GrosheSyncNode::memory().await.unwrap();
+
+        // 1. Alice creates a Household and two grocery lists
+        let (hh_doc_a, hh_ticket_a, hh_id) = node_a
+            .create_household("Smith Family", "Alice")
+            .await
+            .unwrap();
+        let (weekly_doc_a, _, weekly_id) = node_a
+            .create_list_with_meta("Weekly Groceries", "Alice")
+            .await
+            .unwrap();
+        let (costco_doc_a, _, costco_id) = node_a
+            .create_list_with_meta("Costco Run", "Alice")
+            .await
+            .unwrap();
+
+        // Verify household is excluded from list_ids() and included in household_ids()
+        let lists_a = node_a.list_ids().await.unwrap();
+        assert!(lists_a.contains(&weekly_id));
+        assert!(lists_a.contains(&costco_id));
+        assert!(!lists_a.contains(&hh_id));
+        let hhs_a = node_a.household_ids().await.unwrap();
+        assert_eq!(hhs_a, vec![hh_id]);
+
+        // Register both lists in the Household
+        node_a
+            .register_list_in_household(&hh_doc_a, &weekly_doc_a, "Weekly Groceries")
+            .await
+            .unwrap();
+        node_a
+            .register_list_in_household(&hh_doc_a, &costco_doc_a, "Costco Run")
+            .await
+            .unwrap();
+
+        // 2. Bob joins the Household using only the Household ticket
+        let (hh_doc_b, _, _) = node_b
+            .join_household(&hh_ticket_a.to_string(), "Bob")
+            .await
+            .unwrap();
+
+        // Wait for household entries to sync to Bob and reconcile lists
+        let start = std::time::Instant::now();
+        let mut bob_lists = Vec::new();
+        while start.elapsed() < std::time::Duration::from_secs(15) {
+            let _ = node_b.reconcile_household_lists(&hh_doc_b).await;
+            bob_lists = node_b.list_ids().await.unwrap();
+            if bob_lists.contains(&weekly_id) && bob_lists.contains(&costco_id) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            bob_lists.contains(&weekly_id) && bob_lists.contains(&costco_id),
+            "Bob failed to auto-discover household lists: {:?}",
+            bob_lists
+        );
     }
 }
