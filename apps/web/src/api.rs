@@ -74,6 +74,19 @@ pub struct UpdateItemRequest {
     pub photo_base64: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReorderItemRequest {
+    /// Place item immediately before this item ID
+    #[serde(default)]
+    pub before_id: Option<String>,
+    /// Place item immediately after this item ID
+    #[serde(default)]
+    pub after_id: Option<String>,
+    /// Relative directional step: "up", "down", "top", or "bottom"
+    #[serde(default)]
+    pub direction: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToggleCheckRequest {
     pub checked: bool,

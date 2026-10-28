@@ -19,6 +19,13 @@ use tokio::sync::mpsc;
 
 use crate::{AppWindow, GroceryItemData, GroceryListInfo};
 
+/// Direction for reordering items in a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveDirection {
+    Up,
+    Down,
+}
+
 /// Commands dispatched from the Slint UI to the background sync engine.
 #[derive(Debug)]
 pub enum SyncCommand {
@@ -28,6 +35,7 @@ pub enum SyncCommand {
     RotateList { id: String },
     AddItem { raw_input: String },
     EditItem { id: String, raw_input: String },
+    MoveItem { id: String, direction: MoveDirection },
     ToggleItemCheck { id: String },
     DeleteItem { id: String },
     UndoDelete,
@@ -433,6 +441,55 @@ pub fn spawn_sync_bridge(
                                             app.set_frequent_suggestions(ModelRc::new(VecModel::from(suggestions)));
                                             app.set_lists(ModelRc::new(VecModel::from(lists)));
                                         });
+                                    }
+                                }
+                            }
+                        }
+
+                        SyncCommand::MoveItem { id, direction } => {
+                            if let Ok(item_id) = ItemId::from_str(&id) {
+                                if let Some(current_view) = current_proj.get_item(&item_id) {
+                                    let sorted = current_proj.sorted_items();
+                                    let is_checked = current_view.is_checked();
+                                    let group: Vec<_> = sorted.iter().filter(|i| i.is_checked() == is_checked).copied().collect();
+                                    if let Some(idx) = group.iter().position(|i| i.id == item_id) {
+                                        let new_pos = match direction {
+                                            MoveDirection::Up => {
+                                                if idx == 0 {
+                                                    None
+                                                } else {
+                                                    let prev_target = group[idx - 1];
+                                                    let prev_prev = if idx >= 2 { Some(&group[idx - 2].position) } else { None };
+                                                    ItemPosition::between(prev_prev, Some(&prev_target.position)).ok()
+                                                }
+                                            }
+                                            MoveDirection::Down => {
+                                                if idx + 1 >= group.len() {
+                                                    None
+                                                } else {
+                                                    let next_target = group[idx + 1];
+                                                    let next_next = group.get(idx + 2).map(|i| &i.position);
+                                                    ItemPosition::between(Some(&next_target.position), next_next).ok()
+                                                }
+                                            }
+                                        };
+
+                                        if let Some(pos) = new_pos {
+                                            if let Ok(pos_bytes) = to_cbor(&pos) {
+                                                let _ = node.set_entry(&active_doc, DocKey::item_pos(item_id).to_key_bytes(), pos_bytes).await;
+                                            }
+
+                                            let lid = ns_to_list_id(&active_ns_id);
+                                            if let Ok(p) = load_projection(&node, &active_doc, lid).await {
+                                                current_proj = p;
+                                                let items = projection_to_slint_items(&current_proj);
+                                                let lists = load_lists_info(&node).await;
+                                                let _ = app_weak.upgrade_in_event_loop(move |app| {
+                                                    app.set_items(ModelRc::new(VecModel::from(items)));
+                                                    app.set_lists(ModelRc::new(VecModel::from(lists)));
+                                                });
+                                            }
+                                        }
                                     }
                                 }
                             }

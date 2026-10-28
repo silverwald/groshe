@@ -1,4 +1,4 @@
-﻿//! Axum web server and REST/WebSocket endpoints for Groshe Web Companion.
+//! Axum web server and REST/WebSocket endpoints for Groshe Web Companion.
 
 use axum::{
     extract::{
@@ -24,8 +24,8 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::api::{
-    AddItemRequest, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto, ToggleCheckRequest,
-    UpdateItemRequest,
+    AddItemRequest, ItemDto, ListDetailDto, ListSummaryDto, NodeStatusDto, ReorderItemRequest,
+    ToggleCheckRequest, UpdateItemRequest,
 };
 
 #[derive(Clone)]
@@ -85,6 +85,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/lists/:id", get(get_list))
         .route("/api/lists/:id/items", post(add_item))
         .route("/api/lists/:id/items/:item_id", patch(update_item))
+        .route("/api/lists/:id/pos/:item_id", post(reorder_item))
         .route("/api/lists/:id/check/:item_id", post(toggle_check))
         .route("/api/lists/:id/items/:item_id", delete(delete_item))
         .route("/api/photos/:hash", get(get_photo))
@@ -390,6 +391,158 @@ async fn update_item(
         checked: updated_item.is_checked(),
         position: updated_item.position.to_string(),
         photo_hash: updated_item
+            .data
+            .photo_hash
+            .map(|h| h.iter().map(|b| format!("{:02x}", b)).collect()),
+    }))
+}
+
+async fn reorder_item(
+    State(state): State<AppState>,
+    Path((id_str, item_id_str)): Path<(String, String)>,
+    Json(req): Json<ReorderItemRequest>,
+) -> Result<Json<ItemDto>, AppError> {
+    let ns_id = NamespaceId::from_str(&id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let item_id =
+        ItemId::from_str(&item_id_str).map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let doc = state
+        .node
+        .open_list(ns_id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("List '{id_str}' not found")))?;
+
+    let lid = ns_to_list_id(&ns_id);
+    let proj = load_projection(&state.node, &doc, lid).await?;
+
+    let current_view = proj
+        .get_item(&item_id)
+        .ok_or_else(|| AppError::NotFound(format!("Item '{item_id_str}' not found")))?;
+
+    let sorted = proj.sorted_items();
+    let is_checked = current_view.is_checked();
+
+    // Group items by check state for relative directional moves (up/down/top/bottom)
+    let group: Vec<_> = sorted.iter().filter(|i| i.is_checked() == is_checked).copied().collect();
+    let current_idx = group.iter().position(|i| i.id == item_id);
+
+    let new_pos = if let Some(ref dir) = req.direction {
+        match dir.to_lowercase().as_str() {
+            "top" => {
+                if let Some(first) = group.first() {
+                    if first.id == item_id {
+                        current_view.position.clone()
+                    } else {
+                        ItemPosition::before(&first.position)
+                            .map_err(|e| AppError::Internal(e.to_string()))?
+                    }
+                } else {
+                    ItemPosition::initial()
+                }
+            }
+            "bottom" => {
+                if let Some(last) = group.last() {
+                    if last.id == item_id {
+                        current_view.position.clone()
+                    } else {
+                        ItemPosition::after(&last.position)
+                            .map_err(|e| AppError::Internal(e.to_string()))?
+                    }
+                } else {
+                    ItemPosition::initial()
+                }
+            }
+            "up" => {
+                let idx = current_idx.ok_or_else(|| {
+                    AppError::NotFound("Item not found in its check group".to_string())
+                })?;
+                if idx == 0 {
+                    current_view.position.clone()
+                } else {
+                    let prev_target = group[idx - 1];
+                    let prev_prev = if idx >= 2 { Some(&group[idx - 2].position) } else { None };
+                    ItemPosition::between(prev_prev, Some(&prev_target.position))
+                        .map_err(|e| AppError::Internal(e.to_string()))?
+                }
+            }
+            "down" => {
+                let idx = current_idx.ok_or_else(|| {
+                    AppError::NotFound("Item not found in its check group".to_string())
+                })?;
+                if idx + 1 >= group.len() {
+                    current_view.position.clone()
+                } else {
+                    let next_target = group[idx + 1];
+                    let next_next = group.get(idx + 2).map(|i| &i.position);
+                    ItemPosition::between(Some(&next_target.position), next_next)
+                        .map_err(|e| AppError::Internal(e.to_string()))?
+                }
+            }
+            other => {
+                return Err(AppError::BadRequest(format!(
+                    "Invalid direction '{other}'. Expected 'up', 'down', 'top', or 'bottom'"
+                )));
+            }
+        }
+    } else if let Some(ref before_needle) = req.before_id {
+        let before_id = ItemId::from_str(before_needle)
+            .map_err(|e| AppError::BadRequest(format!("Invalid before_id: {e}")))?;
+        let target_item = proj
+            .get_item(&before_id)
+            .ok_or_else(|| AppError::NotFound(format!("Target item '{before_needle}' not found")))?;
+        let others: Vec<_> = sorted.iter().filter(|i| i.id != item_id).copied().collect();
+        let target_idx = others
+            .iter()
+            .position(|i| i.id == before_id)
+            .ok_or_else(|| AppError::NotFound("Target not found".to_string()))?;
+        let prev = if target_idx > 0 { Some(&others[target_idx - 1].position) } else { None };
+        ItemPosition::between(prev, Some(&target_item.position))
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    } else if let Some(ref after_needle) = req.after_id {
+        let after_id = ItemId::from_str(after_needle)
+            .map_err(|e| AppError::BadRequest(format!("Invalid after_id: {e}")))?;
+        let target_item = proj
+            .get_item(&after_id)
+            .ok_or_else(|| AppError::NotFound(format!("Target item '{after_needle}' not found")))?;
+        let others: Vec<_> = sorted.iter().filter(|i| i.id != item_id).copied().collect();
+        let target_idx = others
+            .iter()
+            .position(|i| i.id == after_id)
+            .ok_or_else(|| AppError::NotFound("Target not found".to_string()))?;
+        let next = others.get(target_idx + 1).map(|i| &i.position);
+        ItemPosition::between(Some(&target_item.position), next)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    } else {
+        return Err(AppError::BadRequest(
+            "Must specify 'direction', 'before_id', or 'after_id'".to_string(),
+        ));
+    };
+
+    state
+        .node
+        .set_entry(
+            &doc,
+            DocKey::item_pos(item_id).to_key_bytes(),
+            to_cbor(&new_pos).map_err(|e| AppError::Internal(e.to_string()))?,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let updated_proj = load_projection(&state.node, &doc, lid).await?;
+    let updated_view = updated_proj
+        .get_item(&item_id)
+        .ok_or_else(|| AppError::NotFound(format!("Item '{item_id_str}' not found in projection")))?;
+
+    Ok(Json(ItemDto {
+        id: item_id.to_string(),
+        name: updated_view.data.name.clone(),
+        quantity: updated_view.data.quantity,
+        unit: updated_view.data.unit.clone(),
+        category: updated_view.data.category.clone(),
+        note: updated_view.data.note.clone(),
+        checked: updated_view.is_checked(),
+        position: updated_view.position.to_string(),
+        photo_hash: updated_view
             .data
             .photo_hash
             .map(|h| h.iter().map(|b| format!("{:02x}", b)).collect()),

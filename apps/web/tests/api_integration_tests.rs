@@ -275,3 +275,147 @@ async fn test_web_socket_streaming_and_mutation() {
     }
     assert!(got_pong, "Expected pong response from server");
 }
+
+#[tokio::test]
+async fn test_web_reorder_item_endpoints() {
+    let node = Arc::new(GrosheSyncNode::memory().await.unwrap());
+    let (_doc, _ticket, id) = node.create_list_with_meta("Reorder List", "dan").await.unwrap();
+    let app = create_router(AppState { node: Arc::clone(&node) });
+
+    // 1. Add 3 items in sequence: A, B, C
+    let mut item_ids = Vec::new();
+    for name in ["Apples", "Bananas", "Carrots"] {
+        let payload = serde_json::json!({ "raw_input": name });
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/lists/{id}/items"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let item: ItemDto = serde_json::from_slice(&bytes).unwrap();
+        item_ids.push(item.id);
+    }
+
+    // 2. Initial order should be: Apples (0), Bananas (1), Carrots (2)
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/lists/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let detail: ListDetailDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(detail.items.len(), 3);
+    assert_eq!(detail.items[0].name, "Apples");
+    assert_eq!(detail.items[1].name, "Bananas");
+    assert_eq!(detail.items[2].name, "Carrots");
+
+    // 3. Move Carrots up: should become Apples, Carrots, Bananas
+    let carrots_id = &item_ids[2];
+    let reorder_payload = serde_json::json!({ "direction": "up" });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{id}/pos/{carrots_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(reorder_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/lists/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let detail: ListDetailDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(detail.items[0].name, "Apples");
+    assert_eq!(detail.items[1].name, "Carrots");
+    assert_eq!(detail.items[2].name, "Bananas");
+
+    // 4. Move Bananas to top: should become Bananas, Apples, Carrots
+    let bananas_id = &item_ids[1];
+    let reorder_top_payload = serde_json::json!({ "direction": "top" });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{id}/pos/{bananas_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(reorder_top_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/lists/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let detail: ListDetailDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(detail.items[0].name, "Bananas");
+    assert_eq!(detail.items[1].name, "Apples");
+    assert_eq!(detail.items[2].name, "Carrots");
+
+    // 5. Move Apples after Carrots using after_id: should become Bananas, Carrots, Apples
+    let apples_id = &item_ids[0];
+    let reorder_after_payload = serde_json::json!({ "after_id": carrots_id });
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/lists/{id}/pos/{apples_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(reorder_after_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = create_router(AppState { node })
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/lists/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let detail: ListDetailDto = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(detail.items[0].name, "Bananas");
+    assert_eq!(detail.items[1].name, "Carrots");
+    assert_eq!(detail.items[2].name, "Apples");
+}

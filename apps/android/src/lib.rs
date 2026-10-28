@@ -54,6 +54,22 @@ pub fn setup_app_window(app: &AppWindow, sync_handle: sync_bridge::SyncBridgeHan
     });
 
     let sh = sync_handle.clone();
+    app.on_move_item_up(move |id| {
+        sh.send(sync_bridge::SyncCommand::MoveItem {
+            id: id.to_string(),
+            direction: sync_bridge::MoveDirection::Up,
+        });
+    });
+
+    let sh = sync_handle.clone();
+    app.on_move_item_down(move |id| {
+        sh.send(sync_bridge::SyncCommand::MoveItem {
+            id: id.to_string(),
+            direction: sync_bridge::MoveDirection::Down,
+        });
+    });
+
+    let sh = sync_handle.clone();
     app.on_add_item(move |raw_input| {
         sh.send(sync_bridge::SyncCommand::AddItem {
             raw_input: raw_input.to_string(),

@@ -198,17 +198,43 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
       align-items: center;
       gap: 4px;
     }
-    .btn-edit, .btn-delete {
+    .drag-handle {
+      cursor: grab;
+      color: var(--text-muted);
+      font-size: 1.2rem;
+      padding: 0 4px;
+      user-select: none;
+      display: flex;
+      align-items: center;
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .item-card.drag-over {
+      border: 2px dashed var(--primary);
+      background: #1e2c1e;
+    }
+    .item-card.dragging {
+      opacity: 0.4;
+    }
+    .btn-reorder, .btn-edit, .btn-delete {
       background: transparent;
       border: none;
       font-size: 1.1rem;
       cursor: pointer;
-      width: 32px;
-      height: 32px;
+      width: 30px;
+      height: 30px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: background 0.15s ease;
+    }
+    .btn-reorder {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    .btn-reorder:hover {
+      background: #333333;
+      color: var(--text);
     }
     .btn-edit {
       color: var(--accent);
@@ -331,8 +357,38 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         const card = document.createElement('div');
         card.className = `item-card ${item.checked ? 'checked' : ''}`;
 
+        card.setAttribute('draggable', 'true');
+        card.ondragstart = (e) => {
+          e.dataTransfer.setData('text/plain', item.id);
+          card.classList.add('dragging');
+        };
+        card.ondragend = () => {
+          card.classList.remove('dragging');
+        };
+        card.ondragover = (e) => {
+          e.preventDefault();
+          card.classList.add('drag-over');
+        };
+        card.ondragleave = () => {
+          card.classList.remove('drag-over');
+        };
+        card.ondrop = (e) => {
+          e.preventDefault();
+          card.classList.remove('drag-over');
+          const draggedId = e.dataTransfer.getData('text/plain');
+          if (draggedId && draggedId !== item.id) {
+            handleDropReorder(draggedId, item.id);
+          }
+        };
+
         const left = document.createElement('div');
         left.className = 'item-left';
+
+        const dragHandle = document.createElement('span');
+        dragHandle.className = 'drag-handle';
+        dragHandle.innerHTML = '&#10498;'; // ⠿
+        dragHandle.title = 'Drag to reorder';
+        left.appendChild(dragHandle);
 
         const checkbox = document.createElement('div');
         checkbox.className = 'checkbox';
@@ -374,6 +430,18 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         const actions = document.createElement('div');
         actions.className = 'item-actions';
 
+        const btnUp = document.createElement('button');
+        btnUp.className = 'btn-reorder';
+        btnUp.innerHTML = '&#8593;'; // ↑
+        btnUp.title = 'Move up';
+        btnUp.onclick = () => moveItem(item.id, 'up');
+
+        const btnDown = document.createElement('button');
+        btnDown.className = 'btn-reorder';
+        btnDown.innerHTML = '&#8595;'; // ↓
+        btnDown.title = 'Move down';
+        btnDown.onclick = () => moveItem(item.id, 'down');
+
         const btnEdit = document.createElement('button');
         btnEdit.className = 'btn-edit';
         btnEdit.innerHTML = '&#9998;';
@@ -386,6 +454,8 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         btnDelete.title = 'Delete item';
         btnDelete.onclick = () => deleteItem(item.id);
 
+        actions.appendChild(btnUp);
+        actions.appendChild(btnDown);
         actions.appendChild(btnEdit);
         actions.appendChild(btnDelete);
 
@@ -454,6 +524,34 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
         loadActiveList();
       } catch (err) {
         console.error('Failed to delete item', err);
+      }
+    }
+
+    async function moveItem(itemId, direction) {
+      if (!activeListId) return;
+      try {
+        await fetch(`/api/lists/${activeListId}/pos/${itemId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ direction })
+        });
+        loadActiveList();
+      } catch (err) {
+        console.error('Failed to move item', err);
+      }
+    }
+
+    async function handleDropReorder(draggedId, targetId) {
+      if (!activeListId) return;
+      try {
+        await fetch(`/api/lists/${activeListId}/pos/${draggedId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ before_id: targetId })
+        });
+        loadActiveList();
+      } catch (err) {
+        console.error('Failed to reorder item on drop', err);
       }
     }
 
